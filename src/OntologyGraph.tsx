@@ -112,9 +112,11 @@ export default function OntologyGraph({
     if (initialStage) return;
     setStage(defaultStage(availability));
   }, [scenario.id, availability, initialStage]);
+  // On narrow screens the detail panel would cover the canvas, so it opens on tap only.
+  const autoSelect = variant !== "page" || size.w === 0 || size.w >= 760;
   useEffect(() => {
-    setSelected(focusNodeId ?? null);
-  }, [view.stage, scenario.id, focusNodeId]);
+    setSelected(autoSelect ? (focusNodeId ?? null) : null);
+  }, [view.stage, scenario.id, focusNodeId, autoSelect]);
 
   useEffect(() => {
     const element = canvasRef.current;
@@ -149,7 +151,7 @@ export default function OntologyGraph({
       ? egoLayout(view, focusNodeId, view.stage === "usage" ? view.usedNodeIds : []).nodes
       : stageFrameNodes(view, scenario);
   useEffect(() => {
-    fitTo(frameNodes(), variant === "page" && Boolean(focusNodeId));
+    fitTo(frameNodes(), variant === "page" && Boolean(focusNodeId) && autoSelect);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frameKey]);
 
