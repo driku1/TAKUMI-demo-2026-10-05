@@ -53,6 +53,14 @@ export type ReuseSource =
       location: string;
       quote: string;
     }
+  | {
+      /** An existing (seed) note returned by the same search. */
+      kind: "document";
+      knowledgeId: string;
+      knowledgeTitle: string;
+      location: string;
+      quote: string;
+    }
   | { kind: "dialogue"; answerIndex: number; label: string; quote: string };
 
 export type ReuseCheck = {
@@ -61,8 +69,16 @@ export type ReuseCheck = {
   topic?: string;
   appliedAs: string;
   sources: ReuseSource[];
+  /** Cites the registered (Merged) knowledge. */
   usesKnowledge: boolean;
 };
+
+/**
+ * "knowledge-only": registered knowledge plus retrieved notes cover every
+ * check, so the answer is compiled without expert matching, interview or a
+ * new Knowledge PR. "interview": the usual flow.
+ */
+export type RunMode = "interview" | "knowledge-only";
 
 export type CycleTwoStatus = "used" | "not-registered" | "not-retrieved";
 
@@ -75,7 +91,10 @@ export type RunContext = {
   /** Registered first-cycle knowledge, even when it was not retrieved. */
   registered?: Knowledge;
   status?: CycleTwoStatus;
+  mode: RunMode;
   checks: ReuseCheck[];
+  /** Knowledge-only answers: one-line summary of what the answer is built on. */
+  summary?: string;
 };
 
 /** Finds the first passage of saved knowledge that contains one of the keywords. */
@@ -108,6 +127,22 @@ export function findPassage(
   return undefined;
 }
 
+/** Passage of an existing note (summary first, then its guidance, then the title). */
+export function findDocumentPassage(
+  item: Knowledge,
+  keywords: string[],
+): { location: string; quote: string } | undefined {
+  const hit = (text: string) => keywords.some((word) => text.includes(word));
+  if (hit(item.summary)) return { location: "要約", quote: item.summary };
+  for (const recommendation of item.recommendations ?? []) {
+    if (hit(`${recommendation.title} ${recommendation.body}`)) {
+      return { location: recommendation.title, quote: recommendation.body };
+    }
+  }
+  if (hit(item.title)) return { location: "タイトル", quote: item.title };
+  return undefined;
+}
+
 function answerLabel(scenario: Scenario, answerIndex: number) {
   const number = scenario.dialogue
     .slice(0, answerIndex + 1)
@@ -118,7 +153,7 @@ function answerLabel(scenario: Scenario, answerIndex: number) {
 function buildChecks(scenario: Scenario, cycleOne?: Knowledge): ReuseCheck[] {
   const plan = scenario.followUp;
   if (!plan) return [];
-  const checks = plan.reuse.map((rule) => {
+  const checks: ReuseCheck[] = plan.reuse.map((rule) => {
     const passage = cycleOne ? findPassage(cycleOne, rule.find) : undefined;
     const sources: ReuseSource[] = [];
     if (cycleOne && passage) {
@@ -150,26 +185,122 @@ function buildChecks(scenario: Scenario, cycleOne?: Knowledge): ReuseCheck[] {
       usesKnowledge: sources.some((source) => source.kind === "knowledge"),
     };
   });
-  if (cycleOne?.conditions) {
+  if (cycleOne) checks.push(...conditionsCheck(cycleOne));
+  return checks.filter((check) => check.sources.length > 0);
+}
+
+function conditionsCheck(cycleOne: Knowledge): ReuseCheck[] {
+  return cycleOne.conditions
+    ? [
+        {
+          id: "conditions",
+          label: "適用条件の確認",
+          topic: undefined,
+          appliedAs:
+            "今回の相談が、登録時の適用条件の範囲内かを担当の匠が確認する。",
+          sources: [
+            {
+              kind: "knowledge",
+              knowledgeId: cycleOne.id,
+              knowledgeTitle: cycleOne.title,
+              location: "適用条件",
+              quote: cycleOne.conditions,
+            },
+          ],
+          usesKnowledge: true,
+        },
+      ]
+    : [];
+}
+
+/**
+ * Every check sourced from the registered knowledge or, failing that, from an
+ * existing note in the same search results. Undefined when any check would
+ * still need the expert.
+ */
+function knowledgeOnlyChecks(
+  scenario: Scenario,
+  cycleOne: Knowledge,
+  retrieval: RunContext["retrieval"],
+): ReuseCheck[] | undefined {
+  const plan = scenario.followUp;
+  if (!plan) return undefined;
+  const notes = retrieval.results
+    .map((result) => result.item)
+    .filter((item) => !item.isNew);
+  const checks: ReuseCheck[] = [];
+  for (const rule of plan.reuse) {
+    const passage = findPassage(cycleOne, rule.find);
+    if (passage) {
+      checks.push({
+        id: rule.id,
+        label: rule.label,
+        topic: rule.topic,
+        appliedAs: rule.appliedAs,
+        sources: [
+          {
+            kind: "knowledge",
+            knowledgeId: cycleOne.id,
+            knowledgeTitle: cycleOne.title,
+            ...passage,
+          },
+        ],
+        usesKnowledge: true,
+      });
+      continue;
+    }
+    const words = rule.noteFind ?? rule.find;
+    const note = notes.find((item) => findDocumentPassage(item, words));
+    if (!note) return undefined;
     checks.push({
-      id: "conditions",
-      label: "適用条件の確認",
-      topic: undefined,
-      appliedAs:
-        "今回の相談が、登録時の適用条件の範囲内かを担当の匠が確認する。",
+      id: rule.id,
+      label: rule.label,
+      topic: rule.topic,
+      appliedAs: rule.appliedAs,
       sources: [
         {
-          kind: "knowledge",
-          knowledgeId: cycleOne.id,
-          knowledgeTitle: cycleOne.title,
-          location: "適用条件",
-          quote: cycleOne.conditions,
+          kind: "document",
+          knowledgeId: note.id,
+          knowledgeTitle: note.title,
+          ...findDocumentPassage(note, words)!,
         },
       ],
-      usesKnowledge: true,
+      usesKnowledge: false,
     });
   }
-  return checks.filter((check) => check.sources.length > 0);
+  return [...checks, ...conditionsCheck(cycleOne)];
+}
+
+function resolveKnowledgeOnly(
+  scenario: Scenario,
+  cycleOne: Knowledge,
+  checks: ReuseCheck[],
+): { scenario: Scenario; summary: string } {
+  const notes = [
+    ...new Map(
+      checks
+        .flatMap((check) => check.sources)
+        .filter((source) => source.kind === "document")
+        .map((source) => [source.knowledgeId, source.knowledgeTitle]),
+    ).values(),
+  ];
+  const basis = `登録知見「${cycleOne.title}」（${shortId(cycleOne.id)}）${
+    notes.length ? `と既存ナレッジ「${notes.join("」「")}」` : ""
+  }`;
+  const labels = checks
+    .filter((check) => check.id !== "conditions")
+    .map((check) => check.label);
+  const summary = `${basis}をもとに、${labels.join("・")}の${checks.length}件の確認事項にまとめました。専門家への追加の確認は行っていません。`;
+  return {
+    summary,
+    scenario: {
+      ...scenario,
+      gap: `${basis}で、今回の確認事項（${labels.join("・")}）をすべて根拠つきで示せます。専門家の選定・インタビューは不要と判断しました。`,
+      insight: summary,
+      conditions:
+        "登録知見と既存ナレッジをまとめた回答です。原資料にない材質・数値条件は断定していません。適用前に、対象形状と実際の製造条件が各知見の適用条件の範囲内かを担当の匠が確認してください。",
+    },
+  };
 }
 
 function resolveFollowUp(
@@ -216,13 +347,31 @@ export function prepareRun({
   knowledge: Knowledge[];
 }): RunContext {
   const retrieval = retrieveKnowledge(query, scenario, knowledge);
-  if (!scenario.followUp) return { scenario, retrieval, checks: [] };
+  if (!scenario.followUp) {
+    return { scenario, retrieval, checks: [], mode: "interview" };
+  }
   const registered = cycleOneKnowledge(knowledge, baseScenarioOf(scenario));
   const retrieved = Boolean(
     registered &&
       retrieval.results.some((result) => result.item.id === registered.id),
   );
   const candidate = retrieved ? registered : undefined;
+  const sufficient = candidate
+    ? knowledgeOnlyChecks(scenario, candidate, retrieval)
+    : undefined;
+  if (candidate && sufficient) {
+    const resolved = resolveKnowledgeOnly(scenario, candidate, sufficient);
+    return {
+      scenario: resolved.scenario,
+      retrieval,
+      cycleOne: candidate,
+      registered,
+      status: "used",
+      mode: "knowledge-only",
+      checks: sufficient,
+      summary: resolved.summary,
+    };
+  }
   const candidateChecks = buildChecks(scenario, candidate);
   const cycleOne = candidateChecks.some((check) => check.usesKnowledge)
     ? candidate
@@ -238,6 +387,7 @@ export function prepareRun({
       : registered
         ? "not-retrieved"
         : "not-registered",
+    mode: "interview",
     checks,
   };
 }
@@ -262,6 +412,7 @@ export type KnowledgeUsage = {
   answeredAt: string;
   usedKnowledge: UsedKnowledge[];
   checks: ReuseCheck[];
+  mode: RunMode;
 };
 
 export function buildUsageRecord(
@@ -290,6 +441,7 @@ export function buildUsageRecord(
       ...check,
       sources: check.sources.map((source) => ({ ...source })),
     })),
+    mode: run.mode,
   };
 }
 
@@ -395,4 +547,13 @@ export function addKnowledgeOnce(
   return knowledge.some((existing) => existing.id === item.id)
     ? knowledge
     : [item, ...knowledge];
+}
+
+/** Display label for where a check's evidence comes from. */
+export function sourceLabel(source: ReuseSource): string {
+  return source.kind === "knowledge"
+    ? `登録知見 ${shortId(source.knowledgeId)} · ${source.location}`
+    : source.kind === "document"
+      ? `既存ナレッジ ${source.knowledgeId}「${source.knowledgeTitle}」 · ${source.location}`
+      : source.label;
 }

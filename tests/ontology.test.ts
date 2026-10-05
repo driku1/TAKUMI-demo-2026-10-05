@@ -112,11 +112,16 @@ test("回答の重ね表示（④）は点も線も追加せず、回答の参�
     .sort();
   assert.deepEqual(
     usedTopics,
-    usage.checks.filter((check) => check.usesKnowledge && check.topic).map((check) => check.topic!).sort(),
+    usage.checks
+      .filter((check) => check.topic && check.sources.some((source) => source.kind !== "dialogue"))
+      .map((check) => check.topic!)
+      .sort(),
   );
   assert.ok(view.usedNodeIds.includes("issue-molding-1"), "量産時の反り");
+  // The existing note the answer cited is highlighted too.
+  assert.ok(view.usedNodeIds.includes("doc-seed-2-7"));
   for (const item of view.overlayEdges) {
-    assert.equal(item.source, "knowledge-1");
+    assert.ok(view.usedNodeIds.includes(item.source));
     assert.ok(view.usedNodeIds.includes(item.target));
     assert.ok(!view.edges.some((edge) => edge.id === item.id));
   }

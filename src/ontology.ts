@@ -908,36 +908,59 @@ export function buildOntology({
   const usedEdgeIds: string[] = [];
   const overlayEdges: OntologyEdge[] = [];
   if (stage === "usage" && usage) {
-    usedNodeIds.push("knowledge-1");
-    const targets: { id: string; label: string }[] = [
-      ...issueIds(followUp.followUp!.issue).map((id) => ({
-        id,
-        label: "今回の質問に使用",
-      })),
-      ...usage.checks
-        .filter((check) => check.usesKnowledge && check.topic)
-        .map((check) => ({
-          id: `topic-${cluster.id}-${check.topic}`,
-          label: "回答で使用",
-        })),
+    const sourceNode = (source: KnowledgeUsage["checks"][number]["sources"][number]) =>
+      source.kind === "knowledge"
+        ? "knowledge-1"
+        : source.kind === "document"
+          ? `doc-${source.knowledgeId}`
+          : undefined;
+    const sources = [
+      ...new Set(
+        usage.checks.flatMap((check) =>
+          check.sources.map(sourceNode).filter((id): id is string => Boolean(id && hasNode(id))),
+        ),
+      ),
     ];
-    for (const target of targets) {
-      if (!hasNode(target.id) || usedNodeIds.includes(target.id)) continue;
-      usedNodeIds.push(target.id);
+    usedNodeIds.push(...sources);
+    const links: { source: string; target: string; label: string }[] = [];
+    for (const issue of issueIds(followUp.followUp!.issue)) {
+      for (const source of sources) {
+        links.push({ source, target: issue, label: "今回の質問に使用" });
+      }
+    }
+    for (const check of usage.checks) {
+      if (!check.topic) continue;
+      for (const source of check.sources.map(sourceNode)) {
+        if (source && hasNode(source)) {
+          links.push({
+            source,
+            target: `topic-${cluster.id}-${check.topic}`,
+            label: "回答で使用",
+          });
+        }
+      }
+    }
+    for (const link of links) {
+      if (!hasNode(link.target)) continue;
+      if (!usedNodeIds.includes(link.target)) usedNodeIds.push(link.target);
       const existing = edges.find(
         (item) =>
-          (item.source === "knowledge-1" && item.target === target.id) ||
-          (item.target === "knowledge-1" && item.source === target.id),
+          (item.source === link.source && item.target === link.target) ||
+          (item.target === link.source && item.source === link.target),
       );
       if (existing) {
-        usedEdgeIds.push(existing.id);
-      } else {
+        if (!usedEdgeIds.includes(existing.id)) usedEdgeIds.push(existing.id);
+      } else if (
+        !overlayEdges.some(
+          (item) => item.source === link.source && item.target === link.target,
+        )
+      ) {
         overlayEdges.push({
-          id: `overlay:knowledge-1>${target.id}`,
-          source: "knowledge-1",
-          target: target.id,
+          id: `overlay:${link.source}>${link.target}`,
+          source: link.source,
+          target: link.target,
           kind: "usage",
-          label: target.label,
+          label: link.label,
           used: true,
         });
       }

@@ -95,6 +95,8 @@ export type ReuseRule = {
   topic?: string;
   /** Keywords searched in the saved knowledge (recommendations → dialogue → conditions). */
   find: string[];
+  /** Keywords for existing notes when the registered knowledge has no passage. */
+  noteFind?: string[];
   /** Prepared demo text: how the passage is applied to this consultation. */
   appliedAs: string;
   /** Index of the supporting expert answer in this scenario's dialogue. */
@@ -596,6 +598,7 @@ export const followUpScenarios: Scenario[] = [
           label: "冷却回路のバランス",
           topic: "冷却回路",
           find: ["冷却回路"],
+          noteFind: ["回路ごと", "冷却回路"],
           appliedAs:
             "冷却回路ごとの状態と反りの位置・方向を対応づけて記録し、設計へ共有する。",
           answerIndex: 5,

@@ -20,9 +20,12 @@ try {
   ]) {
     await ask({ chip: tab }); await merge();
     const k1 = JSON.parse(await p.evaluate(() => localStorage.getItem('takumi-knowledge'))).find((x) => x.scenarioId === sid);
-    await ask({ text: question });
+    await home(); await p.locator('textarea[aria-label="相談内容"]').fill(question);
+    await p.getByRole('button', { name: /Run agent/ }).click();
+    await p.locator('.run-state', { hasText: 'Answered' }).waitFor({ timeout: 15000 });
+    check(`${sid}: typed question answered from knowledge only`, (await p.locator('.execution-log').innerText()).includes('Expert interview skipped'));
     await p.locator('.execution-log button', { hasText: 'Response compiled' }).click();
-    check(`${sid}: typed related question cites the merged ID`, (await p.locator('.reuse-panel').innerText()).includes(k1.id));
+    check(`${sid}: answer cites the merged ID`, (await p.locator('.reuse-panel').innerText()).includes(k1.id));
     await p.getByRole('button', { name: 'Knowledge Graph' }).first().click();
     await p.locator('.filter-tabs button', { hasText: tab }).click(); await p.waitForTimeout(400);
     check(`${sid}: graph shows ④ with the used knowledge`, (await p.locator('.onto-stage-buttons button[aria-pressed=true]').innerText()).includes('④') && (await p.locator('.onto-page .onto-node.is-used').count()) === 1);

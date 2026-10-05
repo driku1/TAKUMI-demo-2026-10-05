@@ -43,38 +43,75 @@ test("スライド用の関連相談は収縮差・リブ周辺・ゲート位�
   );
 });
 
-test("第1サイクルで保存した知見のIDと本文を、第2サイクルの検索・回答で参照する", () => {
+test("Mergeした知見と既存ナレッジで足りる質問は、専門家なしで回答する（IDと本文を引用）", () => {
   for (const [index, base] of scenarios.entries()) {
     const followUp = followUpScenarios[index];
     const { item: k1, knowledge } = consultAndMerge(base, initialKnowledge);
     const { run, usage } = answerFollowUp(followUp, knowledge);
     assert.equal(run.status, "used", followUp.id);
+    assert.equal(run.mode, "knowledge-only", followUp.id);
     assert.equal(run.cycleOne?.id, k1.id);
     assert.ok(run.retrieval.results.some((result) => result.item.id === k1.id));
-    assert.ok(run.scenario.dialogue[0].text.includes(k1.title));
     assert.ok(run.scenario.gap.includes(k1.title));
+    assert.ok(run.summary?.includes(k1.title));
     const savedText = [
       ...(k1.recommendations ?? []).map((r) => r.body),
       ...(k1.provenance?.dialogue ?? []).map((m) => m.text),
       k1.conditions ?? "",
       k1.summary,
     ];
-    const knowledgeSources = run.checks.flatMap((check) =>
-      check.sources.filter((source) => source.kind === "knowledge"),
-    );
-    assert.ok(knowledgeSources.length >= 2);
-    for (const source of knowledgeSources) {
-      assert.equal(source.kind === "knowledge" && source.knowledgeId, k1.id);
-      assert.ok(savedText.includes(source.quote), `quote from saved note: ${source.quote}`);
+    const sources = run.checks.flatMap((check) => check.sources);
+    assert.ok(sources.length >= run.checks.length);
+    assert.ok(sources.every((source) => source.kind !== "dialogue"), "no interview");
+    for (const source of sources) {
+      if (source.kind === "knowledge") {
+        assert.equal(source.knowledgeId, k1.id);
+        assert.ok(savedText.includes(source.quote), source.quote);
+      } else if (source.kind === "document") {
+        const note = run.retrieval.results.find((r) => r.item.id === source.knowledgeId)?.item;
+        assert.ok(note && !note.isNew, `retrieved existing note ${source.knowledgeId}`);
+        const noteText = [note.title, note.summary, ...(note.recommendations ?? []).map((r) => r.body)];
+        assert.ok(noteText.includes(source.quote), source.quote);
+      }
     }
     assert.deepEqual(usage?.usedKnowledge.map((item) => item.id), [k1.id]);
-    assert.equal(usage?.checks.length, run.checks.length);
+    assert.equal(usage?.mode, "knowledge-only");
   }
+});
+
+test("スライドの問いは、冷却回路のバランスを既存ナレッジ（seed-2-7）で補って回答する", () => {
+  const { knowledge } = consultAndMerge(molding, initialKnowledge);
+  const { run } = answerFollowUp(slide, knowledge);
+  const cooling = run.checks.find((check) => check.id === "cooling")!;
+  assert.deepEqual(
+    cooling.sources.map((source) => source.kind === "document" && source.knowledgeId),
+    ["seed-2-7"],
+  );
+  assert.ok(run.checks.filter((check) => check.id !== "cooling").every((check) => check.usesKnowledge));
+});
+
+test("登録知見と既存ナレッジで足りない論点があれば、専門家インタビューに進む", () => {
+  const { knowledge } = consultAndMerge(molding, initialKnowledge);
+  const harder = {
+    ...slide,
+    followUp: {
+      ...slide.followUp!,
+      reuse: [
+        ...slide.followUp!.reuse,
+        { id: "unknown", label: "未登録の論点", find: ["どこにも無い語"], appliedAs: "専門家に確認する。", answerIndex: 5 },
+      ],
+    },
+  };
+  const run = prepareRun({ query: harder.question, scenario: harder, knowledge });
+  assert.equal(run.mode, "interview");
+  assert.equal(run.status, "used");
+  assert.ok(run.checks.some((check) => check.sources.some((source) => source.kind === "dialogue")));
 });
 
 test("第1サイクルの知見が未登録なら、使ったことにしない", () => {
   const { run, usage } = answerFollowUp(slide, initialKnowledge);
   assert.equal(run.status, "not-registered");
+  assert.equal(run.mode, "interview");
   assert.equal(run.cycleOne, undefined);
   assert.equal(usage, null);
   assert.ok(run.checks.every((check) => !check.usesKnowledge));

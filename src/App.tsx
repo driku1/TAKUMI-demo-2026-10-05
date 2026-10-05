@@ -26,6 +26,7 @@ import {
 import {
   experts,
   scenarios,
+  followUpScenarios,
   baseScenarioOf,
   matchScenario,
   initialKnowledge,
@@ -43,6 +44,7 @@ import {
   buildUsageRecord,
   prepareRun,
   shortId,
+  sourceLabel,
   type KnowledgeUsage,
 } from "./knowledge-cycle";
 
@@ -160,12 +162,15 @@ export default function App() {
     [tick, runId, run, query],
   );
   const dialogOpen = Boolean(modal || expertDetail || article);
+  // Answers built only from approved knowledge skip expert matching and the
+  // interview, so they finish after the search instead of after the dialogue.
+  const quickAnswer = run.mode === "knowledge-only";
   useEffect(() => {
     if (!running) return;
     const timer = window.setInterval(
       () =>
         setTick((v) => {
-          if (v >= 8) {
+          if (v >= 8 || (quickAnswer && v >= 1)) {
             setRunning(false);
             return 9;
           }
@@ -174,7 +179,7 @@ export default function App() {
       1800,
     );
     return () => clearInterval(timer);
-  }, [running]);
+  }, [running, quickAnswer]);
   useEffect(() => {
     if (toast) {
       const t = setTimeout(() => setToast(""), 3600);
@@ -290,9 +295,7 @@ export default function App() {
                   (check) =>
                     `- ${check.label}：${check.appliedAs}（根拠：${check.sources
                       .map((source) =>
-                        source.kind === "knowledge"
-                          ? `登録知見 ${shortId(source.knowledgeId)} ${source.location}`
-                          : source.label,
+                        sourceLabel(source),
                       )
                       .join(" + ")}）`,
                 )
@@ -300,6 +303,13 @@ export default function App() {
             : "登録知見は使用していません。"
         }`
       : "";
+    if (run.mode === "knowledge-only") {
+      setExportContent(
+        `# ${query}\n\nデモシミュレーション / 登録知見と既存ナレッジから作成（専門家への追加確認なし）\n\n## 回答\n${run.summary}${reuse}\n\n## 適用条件\n${run.scenario.conditions}`,
+      );
+      setModal("export");
+      return;
+    }
     const content = `# ${scenario.title}\n\nデモシミュレーション / 実務適用前に専門家レビューが必要\n\n## 相談内容\n${query}${reuse}\n\n## 抽出された知見\n${scenario.insight}\n\n## 設計への提案\n${scenario.recommendations.map((r) => `### ${r.title}\n${r.body}`).join("\n\n")}\n\n## 出典\n${activeExpert.name}との模擬インタビュー\n\n## 適用条件\n${scenario.conditions}\n\n## 対話記録\n${[...run.scenario.dialogue, ...extraMessages].map((m) => `${m.speaker === "ai" ? "AI" : activeExpert.name}: ${m.text}`).join("\n\n")}`;
     setExportContent(content);
     setModal("export");
@@ -695,7 +705,12 @@ export default function App() {
                             Sample questions
                           </div>
                           <div className="sample-chips">
-                            {scenarios.map((s) => (
+                            {[
+                              ...scenarios,
+                              ...followUpScenarios.filter(
+                                (item) => item.id === "molding-c2",
+                              ),
+                            ].map((s) => (
                               <button
                                 className={
                                   selectedExample === s.id ? "selected" : ""
@@ -1276,7 +1291,7 @@ export default function App() {
                               "初回質問と、匠の回答から生成した追加質問を確認します。",
                               "約16秒で模擬対話を再生。一時停止と追加質問に対応。",
                               "設計提案と登録PRの差分を確認し、模擬レビュー後にマージします。マージ後は追加された知見と接続先を補助グラフで確認できます。",
-                              "登録した知見に関係する質問をすると、検索でヒットした登録知見がIDと本文の引用つきで回答に使われます（ヒットしなければ使ったことにしません）。Knowledge Graphの①〜④で、登録前・追加後・注目・回答での活用を比較できます。",
+                              "登録した知見に関係する質問をすると、検索でヒットした登録知見がIDと本文の引用つきで回答に使われます（ヒットしなければ使ったことにしません）。登録知見と既存ナレッジで答えられる場合は、専門家の選定・インタビュー・登録PRを省いてすぐに回答します。Knowledge Graphの①〜④で、登録前・追加後・注目・回答での活用を比較できます。",
                             ][i]
                           }
                         </p>

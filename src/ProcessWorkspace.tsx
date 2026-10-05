@@ -20,6 +20,7 @@ import {
   buildMergedKnowledge,
   canMergeKnowledge,
   shortId,
+  sourceLabel,
   type RunContext,
 } from "./knowledge-cycle";
 import "./process-workspace.css";
@@ -61,6 +62,9 @@ export default function ProcessWorkspace(props: Props) {
   const { scenario, retrieval } = run;
   // Reuse is shown only when Merged knowledge was actually retrieved and cited.
   const reused = run.cycleOne;
+  // Registered knowledge and retrieved notes answer everything: no expert,
+  // no interview and no new Knowledge PR.
+  const knowledgeOnly = run.mode === "knowledge-only";
   const cycleOneRank = run.registered
     ? retrieval.results.findIndex((result) => result.item.id === run.registered!.id)
     : -1;
@@ -149,7 +153,39 @@ export default function ProcessWorkspace(props: Props) {
         },
       ]
     : [];
-  const events = [
+  const knowledgeOnlyEvents = [
+    {
+      id: "search",
+      tick: 0,
+      title: "Knowledge retrieved",
+      body: `${retrieval.results.length} results from ${retrieval.searchedCount} notes`,
+      step: 0,
+    },
+    {
+      id: "registered-knowledge",
+      tick: 0,
+      title: "Registered knowledge found",
+      body: reused
+        ? `登録知見 ${shortId(reused.id)} · 検索${cycleOneRank + 1}位`
+        : "",
+      step: 0,
+    },
+    {
+      id: "skipped",
+      tick: 1,
+      title: "Expert interview skipped",
+      body: "登録知見と既存ナレッジで回答可能",
+      step: 1,
+    },
+    {
+      id: "response",
+      tick: 9,
+      title: "Response compiled",
+      body: `${run.checks.length} checks from approved knowledge`,
+      step: 4,
+    },
+  ];
+  const events = knowledgeOnly ? knowledgeOnlyEvents : [
     ...reuseEvents,
     {
       id: "search",
@@ -241,7 +277,9 @@ export default function ProcessWorkspace(props: Props) {
           <span className={`run-state ${running ? "working" : ""}`}>
             {savedId
               ? "Merged"
-              : ready
+              : ready && knowledgeOnly
+                ? "Answered"
+                : ready
                 ? review === "approved"
                   ? "Ready to merge"
                   : "Pending review"
@@ -350,9 +388,11 @@ export default function ProcessWorkspace(props: Props) {
                     : review === "changes"
                       ? "Changes requested"
                       : "Draft"
-                : activeStep === 3 && !ready
-                  ? "In progress"
-                  : "Ready"}
+                : knowledgeOnly && activeStep === 1
+                  ? "Skipped"
+                  : activeStep === 3 && !ready
+                    ? "In progress"
+                    : "Ready"}
             </span>
           </div>
           {activeStep === 0 && (
@@ -401,6 +441,11 @@ export default function ProcessWorkspace(props: Props) {
                       {reused.provenance?.review.reviewer ?? reused.author}
                       がApprove review後にMerge（模擬）
                     </p>
+                    {knowledgeOnly && (
+                      <p>
+                        登録知見と既存ナレッジで確認事項をすべて根拠つきで示せるため、専門家の選定・インタビューは行いません。
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
@@ -438,7 +483,24 @@ export default function ProcessWorkspace(props: Props) {
               </div>
             </>
           )}
-          {activeStep === 1 && (
+          {activeStep === 1 && knowledgeOnly && (
+            <div className="skip-panel">
+              <p className="trace-intro">
+                登録知見と既存ナレッジで、今回の確認事項をすべて根拠つきで示せます。そのため、専門家の選定・質問生成・インタビューと、新しい知見の登録PRは行いません。
+              </p>
+              <ul className="skip-coverage">
+                {run.checks.map((check) => (
+                  <li key={check.id}>
+                    <strong>{check.label}</strong>
+                    <span>
+                      {check.sources.map((source) => sourceLabel(source)).join(" / ")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {activeStep === 1 && !knowledgeOnly && (
             <>
               <p className="trace-intro">
                 登録された{experts.length}
@@ -657,6 +719,12 @@ export default function ProcessWorkspace(props: Props) {
           )}
           {activeStep === 4 && (
             <>
+              {knowledgeOnly && (
+                <div className="answer-summary">
+                  <span>Answer from approved knowledge</span>
+                  <p>{scenario.insight}</p>
+                </div>
+              )}
               {reused && (
                 <section className="reuse-panel used" aria-label="登録知見の活用">
                   <div className="reuse-heading">
@@ -664,9 +732,9 @@ export default function ProcessWorkspace(props: Props) {
                     <div>
                       <span>Knowledge reuse · 登録知見の活用</span>
                       <strong>
-                        登録知見を
-                        {run.checks.filter((check) => check.usesKnowledge).length}
-                        件の確認事項に使用
+                        {knowledgeOnly
+                          ? `登録知見と既存ナレッジだけで回答（確認事項${run.checks.length}件）`
+                          : `登録知見を${run.checks.filter((check) => check.usesKnowledge).length}件の確認事項に使用`}
                       </strong>
                     </div>
                   </div>
@@ -692,14 +760,22 @@ export default function ProcessWorkspace(props: Props) {
                     {run.checks.map((check) => (
                       <li
                         key={check.id}
-                        className={check.usesKnowledge ? "uses" : "new"}
+                        className={
+                          check.usesKnowledge
+                            ? "uses"
+                            : check.sources.some((source) => source.kind === "document")
+                              ? "uses-document"
+                              : "new"
+                        }
                       >
                         <div className="reuse-check-title">
                           <strong>{check.label}</strong>
                           <em>
                             {check.usesKnowledge
                               ? "登録知見を使用"
-                              : "今回の対話で追加"}
+                              : check.sources.some((source) => source.kind === "document")
+                                ? "既存ナレッジを使用"
+                                : "今回の対話で追加"}
                           </em>
                         </div>
                         <p>{check.appliedAs}</p>
@@ -707,9 +783,9 @@ export default function ProcessWorkspace(props: Props) {
                           {check.sources.map((source, index) => (
                             <li key={index} className={source.kind}>
                               <b>
-                                {source.kind === "knowledge"
-                                  ? `登録知見 ${shortId(source.knowledgeId)} · ${source.location}`
-                                  : `${source.label} · ${expert.name}`}
+                                {source.kind === "dialogue"
+                                  ? `${sourceLabel(source)} · ${expert.name}`
+                                  : sourceLabel(source)}
                               </b>
                               <q>{source.quote}</q>
                             </li>
@@ -719,7 +795,9 @@ export default function ProcessWorkspace(props: Props) {
                     ))}
                   </ol>
                   <p className="trace-note">
-                    引用はブラウザに保存された登録知見の本文から取得しています。専門家の回答はデモ用に準備した内容で、AIの生成結果ではありません。
+                    {knowledgeOnly
+                      ? "引用は、ブラウザに保存された登録知見と既存ナレッジの本文から取得しています。今回は専門家への確認を行っていません。"
+                      : "引用はブラウザに保存された登録知見の本文から取得しています。専門家の回答はデモ用に準備した内容で、AIの生成結果ではありません。"}
                   </p>
                   {props.renderAnswerGraph && (
                     <div className="answer-graph">
@@ -732,6 +810,8 @@ export default function ProcessWorkspace(props: Props) {
                   )}
                 </section>
               )}
+              {!knowledgeOnly && (
+              <>
               <div className="answer-summary">
                 <span>Design recommendation</span>
                 <p>{scenario.insight}</p>
@@ -760,6 +840,8 @@ export default function ProcessWorkspace(props: Props) {
                     </blockquote>
                   ))}
               </details>
+              </>
+              )}
               <div className="trace-gap">
                 <strong>Conditions & limitations</strong>
                 <p>{scenario.conditions}</p>
@@ -769,10 +851,16 @@ export default function ProcessWorkspace(props: Props) {
                   <Download size={15} />
                   Export response
                 </button>
-                <button className="primary-button" onClick={() => openStep(5)}>
-                  <GitPullRequest size={16} />
-                  Open knowledge PR <ArrowRight size={15} />
-                </button>
+                {knowledgeOnly ? (
+                  <span className="trace-note">
+                    新しく得た知見はないため、登録PRは作成しません。
+                  </span>
+                ) : (
+                  <button className="primary-button" onClick={() => openStep(5)}>
+                    <GitPullRequest size={16} />
+                    Open knowledge PR <ArrowRight size={15} />
+                  </button>
+                )}
               </div>
             </>
           )}
