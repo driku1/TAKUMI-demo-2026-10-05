@@ -20,6 +20,12 @@ try {
   ]) {
     await ask({ chip: tab }); await merge();
     const k1 = JSON.parse(await p.evaluate(() => localStorage.getItem('takumi-knowledge'))).find((x) => x.scenarioId === sid);
+    await home(); await p.locator('.sample-chips button', { hasText: tab }).click();
+    await p.getByRole('button', { name: /Run agent/ }).click();
+    await p.locator('.run-state', { hasText: 'Answered' }).waitFor({ timeout: 15000 });
+    check(`${sid}: same question answered from the merged note`, (await p.locator('.execution-log').innerText()).includes('Expert interview skipped'));
+    await p.locator('.execution-log button', { hasText: 'Response compiled' }).click();
+    check(`${sid}: same question cites the merged ID`, (await p.locator('.reuse-panel').innerText()).includes(k1.id));
     await home(); await p.locator('textarea[aria-label="相談内容"]').fill(question);
     await p.getByRole('button', { name: /Run agent/ }).click();
     await p.locator('.run-state', { hasText: 'Answered' }).waitFor({ timeout: 15000 });

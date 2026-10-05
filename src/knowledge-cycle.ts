@@ -1,10 +1,8 @@
 import {
+  allScenarios,
   baseScenarioOf,
-  followUpScenarios,
-  scenarios,
   type BaseScenarioId,
   type Expert,
-  type FollowUpScenarioId,
   type Knowledge,
   type Scenario,
   type ScenarioId,
@@ -45,6 +43,24 @@ export function cycleTwoKnowledge(
   );
 }
 
+/** Latest knowledge Merged from this same consultation (base or related). */
+export function sameConsultationKnowledge(
+  knowledge: Knowledge[],
+  scenario: Scenario,
+): Knowledge | undefined {
+  return scenario.followUp
+    ? cycleTwoKnowledge(knowledge, scenario)
+    : cycleOneKnowledge(knowledge, scenario);
+}
+
+/** Registered knowledge of a theme: its base consultation or the related one. */
+function belongsToTheme(item: Knowledge, base: Scenario): boolean {
+  if (!item.isNew) return false;
+  if (!item.scenarioId) return Boolean(cycleOneKnowledge([item], base));
+  const origin = allScenarios.find((entry) => entry.id === item.scenarioId);
+  return Boolean(origin && baseScenarioOf(origin).id === base.id);
+}
+
 export type ReuseSource =
   | {
       kind: "knowledge";
@@ -82,15 +98,23 @@ export type RunMode = "interview" | "knowledge-only";
 
 export type CycleTwoStatus = "used" | "not-registered" | "not-retrieved";
 
+/**
+ * "same": this consultation was answered and Merged before, so its own note
+ * answers it again. "related": the related question reuses the note Merged
+ * from the theme's first consultation.
+ */
+export type KnowledgeMatch = "same" | "related";
+
 export type RunContext = {
-  /** Scenario with second-cycle texts resolved against the registered knowledge. */
+  /** Scenario with texts resolved against the registered knowledge. */
   scenario: Scenario;
   retrieval: ReturnType<typeof retrieveKnowledge>;
-  /** First-cycle knowledge that was registered, retrieved and cited. */
-  cycleOne?: Knowledge;
-  /** Registered first-cycle knowledge, even when it was not retrieved. */
+  /** Registered knowledge that was retrieved and cited in this answer. */
+  cited?: Knowledge;
+  /** Registered knowledge this run looked for, even when it was not retrieved. */
   registered?: Knowledge;
   status?: CycleTwoStatus;
+  match?: KnowledgeMatch;
   mode: RunMode;
   checks: ReuseCheck[];
   /** Knowledge-only answers: one-line summary of what the answer is built on. */
@@ -189,8 +213,8 @@ function buildChecks(scenario: Scenario, cycleOne?: Knowledge): ReuseCheck[] {
   return checks.filter((check) => check.sources.length > 0);
 }
 
-function conditionsCheck(cycleOne: Knowledge): ReuseCheck[] {
-  return cycleOne.conditions
+function conditionsCheck(item: Knowledge): ReuseCheck[] {
+  return item.conditions
     ? [
         {
           id: "conditions",
@@ -201,10 +225,10 @@ function conditionsCheck(cycleOne: Knowledge): ReuseCheck[] {
           sources: [
             {
               kind: "knowledge",
-              knowledgeId: cycleOne.id,
-              knowledgeTitle: cycleOne.title,
+              knowledgeId: item.id,
+              knowledgeTitle: item.title,
               location: "適用条件",
-              quote: cycleOne.conditions,
+              quote: item.conditions,
             },
           ],
           usesKnowledge: true,
@@ -303,6 +327,53 @@ function resolveKnowledgeOnly(
   };
 }
 
+/**
+ * The same consultation asked again: its Merged note is the answer. Each
+ * recommendation and the applicability conditions are quoted as saved.
+ */
+function sameConsultationChecks(item: Knowledge): ReuseCheck[] {
+  const recommendations = item.recommendations ?? [];
+  if (!recommendations.length) return [];
+  return [
+    ...recommendations.map((recommendation, index) => ({
+      id: `recommendation-${index + 1}`,
+      label: recommendation.title,
+      appliedAs: "",
+      sources: [
+        {
+          kind: "knowledge" as const,
+          knowledgeId: item.id,
+          knowledgeTitle: item.title,
+          location: `推奨${index + 1}`,
+          quote: recommendation.body,
+        },
+      ],
+      usesKnowledge: true,
+    })),
+    ...conditionsCheck(item),
+  ];
+}
+
+function resolveSameConsultation(
+  scenario: Scenario,
+  item: Knowledge,
+  checks: ReuseCheck[],
+): { scenario: Scenario; summary: string } {
+  const basis = `登録知見「${item.title}」（${shortId(item.id)}）`;
+  const count = checks.filter((check) => check.id !== "conditions").length;
+  const summary = `同じ相談への${basis}から回答します。登録時の結論は「${item.summary}」です。推奨${count}件と適用条件を、登録時の本文のまま示します。専門家への追加の確認は行っていません。`;
+  return {
+    summary,
+    scenario: {
+      ...scenario,
+      gap: `同じ相談への${basis}がMerge済みです。推奨${count}件と適用条件をそのまま根拠として示せるため、専門家の選定・インタビューは不要と判断しました。`,
+      insight: summary,
+      conditions:
+        "同じ相談の登録知見を、登録時の本文のまま示した回答です。適用前に、今回の対象形状と製造条件が登録時の適用条件の範囲内かを担当の匠が確認してください。",
+    },
+  };
+}
+
 function resolveFollowUp(
   scenario: Scenario,
   cycleOne: Knowledge | undefined,
@@ -333,9 +404,10 @@ function resolveFollowUp(
 }
 
 /**
- * Prepares one consultation run. For a second-cycle consultation the
- * first-cycle knowledge is cited only when it is registered, retrieved by this
- * run's search and contains a matching passage.
+ * Prepares one consultation run. Registered knowledge is cited only when it is
+ * Merged, retrieved by this run's search and contains the quoted passage:
+ * the same consultation is answered from its own note; a related consultation
+ * reuses the theme's first note and, when that is not enough, the interview.
  */
 export function prepareRun({
   query,
@@ -347,15 +419,33 @@ export function prepareRun({
   knowledge: Knowledge[];
 }): RunContext {
   const retrieval = retrieveKnowledge(query, scenario, knowledge);
+  const isRetrieved = (item: Knowledge | undefined) =>
+    Boolean(
+      item && retrieval.results.some((result) => result.item.id === item.id),
+    );
+  const previous = sameConsultationKnowledge(knowledge, scenario);
+  const repeated = isRetrieved(previous)
+    ? sameConsultationChecks(previous!)
+    : [];
+  if (previous && repeated.length) {
+    const resolved = resolveSameConsultation(scenario, previous, repeated);
+    return {
+      scenario: resolved.scenario,
+      retrieval,
+      cited: previous,
+      registered: previous,
+      status: "used",
+      match: "same",
+      mode: "knowledge-only",
+      checks: repeated,
+      summary: resolved.summary,
+    };
+  }
   if (!scenario.followUp) {
     return { scenario, retrieval, checks: [], mode: "interview" };
   }
   const registered = cycleOneKnowledge(knowledge, baseScenarioOf(scenario));
-  const retrieved = Boolean(
-    registered &&
-      retrieval.results.some((result) => result.item.id === registered.id),
-  );
-  const candidate = retrieved ? registered : undefined;
+  const candidate = isRetrieved(registered) ? registered : undefined;
   const sufficient = candidate
     ? knowledgeOnlyChecks(scenario, candidate, retrieval)
     : undefined;
@@ -364,32 +454,44 @@ export function prepareRun({
     return {
       scenario: resolved.scenario,
       retrieval,
-      cycleOne: candidate,
+      cited: candidate,
       registered,
       status: "used",
+      match: "related",
       mode: "knowledge-only",
       checks: sufficient,
       summary: resolved.summary,
     };
   }
   const candidateChecks = buildChecks(scenario, candidate);
-  const cycleOne = candidateChecks.some((check) => check.usesKnowledge)
+  const cited = candidateChecks.some((check) => check.usesKnowledge)
     ? candidate
     : undefined;
-  const checks = cycleOne ? candidateChecks : buildChecks(scenario);
+  const checks = cited ? candidateChecks : buildChecks(scenario);
   return {
-    scenario: resolveFollowUp(scenario, cycleOne, checks),
+    scenario: resolveFollowUp(scenario, cited, checks),
     retrieval,
-    cycleOne,
+    cited,
     registered,
-    status: cycleOne
+    status: cited
       ? "used"
       : registered
         ? "not-retrieved"
         : "not-registered",
+    ...(cited ? { match: "related" as const } : {}),
     mode: "interview",
     checks,
   };
+}
+
+/** Words for what a knowledge-only answer is built on. */
+export function answerBasis(run: RunContext): string {
+  if (run.match === "same") return "同じ相談の登録知見";
+  return run.checks.some((check) =>
+    check.sources.some((source) => source.kind === "document"),
+  )
+    ? "登録知見と既存ナレッジ"
+    : "登録知見";
 }
 
 export type UsedKnowledge = {
@@ -406,7 +508,7 @@ export type UsedKnowledge = {
  */
 export type KnowledgeUsage = {
   runId: string;
-  scenarioId: FollowUpScenarioId;
+  scenarioId: ScenarioId;
   baseScenarioId: BaseScenarioId;
   question: string;
   answeredAt: string;
@@ -419,13 +521,12 @@ export function buildUsageRecord(
   run: RunContext,
   { runId, question, now = new Date() }: { runId: string; question: string; now?: Date },
 ): KnowledgeUsage | null {
-  const plan = run.scenario.followUp;
-  if (!plan || !run.cycleOne) return null;
-  const item = run.cycleOne;
+  if (!run.cited) return null;
+  const item = run.cited;
   return {
     runId,
-    scenarioId: run.scenario.id as FollowUpScenarioId,
-    baseScenarioId: plan.baseScenarioId,
+    scenarioId: run.scenario.id,
+    baseScenarioId: baseScenarioOf(run.scenario).id as BaseScenarioId,
     question,
     answeredAt: now.toISOString(),
     usedKnowledge: [
@@ -446,9 +547,9 @@ export function buildUsageRecord(
 }
 
 /**
- * Latest usage of a base scenario's registered knowledge. Usage whose cited
- * knowledge is missing, or is not registered knowledge of that scenario, is
- * ignored so the graph never shows a use that cannot be traced.
+ * Latest usage of a theme's registered knowledge. Usage whose cited knowledge
+ * is missing, or is not registered knowledge of that theme, is ignored so the
+ * graph never shows a use that cannot be traced.
  */
 export function latestUsageFor(
   records: KnowledgeUsage[],
@@ -458,15 +559,10 @@ export function latestUsageFor(
   return records.find(
     (record) =>
       record.baseScenarioId === base.id &&
+      record.usedKnowledge.length > 0 &&
       record.usedKnowledge.every((used) => {
         const item = knowledge.find((entry) => entry.id === used.id);
-        return Boolean(
-          item &&
-            item.isNew &&
-            (item.scenarioId
-              ? item.scenarioId === base.id
-              : cycleOneKnowledge([item], base)),
-        );
+        return Boolean(item && belongsToTheme(item, base));
       }),
   );
 }

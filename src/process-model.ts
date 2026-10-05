@@ -43,7 +43,13 @@ const expansions = {
   ],
 } satisfies Record<ScenarioId, string[]>;
 
-/** Transparent local demo retrieval: ranked lexical matches, not an AI confidence score. */
+/**
+ * Transparent local demo retrieval: ranked lexical matches, not an AI
+ * confidence score. Ties go to the more recently Merged note, so a note
+ * registered again is found before its older copies.
+ */
+const mergedAt = (item: Knowledge) => item.provenance?.review.mergedAt ?? "";
+
 export function retrieveKnowledge(
   query: string,
   scenario: Scenario,
@@ -73,7 +79,12 @@ export function retrieveKnowledge(
       return { item, matched, score };
     })
     .filter((result) => result.score > 0)
-    .sort((a, b) => b.score - a.score || a.item.id.localeCompare(b.item.id))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        mergedAt(b.item).localeCompare(mergedAt(a.item)) ||
+        a.item.id.localeCompare(b.item.id),
+    )
     .slice(0, 6);
   return {
     extracted,

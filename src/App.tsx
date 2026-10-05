@@ -42,6 +42,7 @@ import {
   KNOWLEDGE_STORAGE_KEY,
   addKnowledgeOnce,
   buildUsageRecord,
+  answerBasis,
   prepareRun,
   shortId,
   sourceLabel,
@@ -287,13 +288,13 @@ export default function App() {
     }
   };
   const download = () => {
-    const reuse = run.scenario.followUp
+    const reuse = run.scenario.followUp || run.cited
       ? `\n\n## 登録知見の活用\n${
-          run.cycleOne
-            ? `使用した登録知見：${run.cycleOne.title}（ID ${run.cycleOne.id}）\n\n${run.checks
+          run.cited
+            ? `使用した登録知見：${run.cited.title}（ID ${run.cited.id}）\n\n${run.checks
                 .map(
                   (check) =>
-                    `- ${check.label}：${check.appliedAs}（根拠：${check.sources
+                    `- ${check.label}：${check.appliedAs || check.sources[0]?.quote}（根拠：${check.sources
                       .map((source) =>
                         sourceLabel(source),
                       )
@@ -305,7 +306,7 @@ export default function App() {
       : "";
     if (run.mode === "knowledge-only") {
       setExportContent(
-        `# ${query}\n\nデモシミュレーション / 登録知見と既存ナレッジから作成（専門家への追加確認なし）\n\n## 回答\n${run.summary}${reuse}\n\n## 適用条件\n${run.scenario.conditions}`,
+        `# ${query}\n\nデモシミュレーション / ${answerBasis(run)}から作成（専門家への追加確認なし）\n\n## 回答\n${run.summary}${reuse}\n\n## 適用条件\n${run.scenario.conditions}`,
       );
       setModal("export");
       return;
@@ -556,6 +557,11 @@ export default function App() {
                   key={runId ?? `${scenario.id}:${query}`}
                   query={query}
                   run={run}
+                  knowledge={runKnowledge}
+                  onOpenGraph={() => {
+                    setBrowseScenario(baseScenarioOf(scenario));
+                    navigate("graph");
+                  }}
                   tick={tick}
                   running={running}
                   savedId={savedId}
@@ -1286,12 +1292,12 @@ export default function App() {
                         <p>
                           {
                             [
-                              "入力質問から検索語を抽出し、取得記事と一致理由を確認します。",
-                              "専門領域と参照記事から推薦理由を確認します。",
-                              "初回質問と、匠の回答から生成した追加質問を確認します。",
+                              "入力質問から検索語を抽出し、取得記事と一致理由を確認します。検索結果はナレッジグラフ上の位置でも表示します。",
+                              "専門領域と参照記事から推薦理由を確認します。候補者ごとに、インタビューすると追加が想定される知見と接続先を想定グラフで比較できます。",
+                              "初回質問と、匠の回答から生成した追加質問を確認します。どの既存知見から何が未確認と判断して質問を作ったかを、グラフでも表示します。",
                               "約16秒で模擬対話を再生。一時停止と追加質問に対応。",
                               "設計提案と登録PRの差分を確認し、模擬レビュー後にマージします。マージ後は追加された知見と接続先を補助グラフで確認できます。",
-                              "登録した知見に関係する質問をすると、検索でヒットした登録知見がIDと本文の引用つきで回答に使われます（ヒットしなければ使ったことにしません）。登録知見と既存ナレッジで答えられる場合は、専門家の選定・インタビュー・登録PRを省いてすぐに回答します。Knowledge Graphの①〜④で、登録前・追加後・注目・回答での活用を比較できます。",
+                              "同じ相談をもう一度したり、登録した知見に関係する質問をしたりすると、検索でヒットした登録知見がIDと本文の引用つきで回答に使われます（ヒットしなければ使ったことにしません）。登録知見と既存ナレッジで答えられる場合は、専門家の選定・インタビュー・登録PRを省いてすぐに回答します。Knowledge Graphの①〜④で、登録前・追加後・注目・回答での活用を比較できます。",
                             ][i]
                           }
                         </p>
@@ -1302,7 +1308,7 @@ export default function App() {
                 <div className="demo-explanation">
                   <strong>デモの範囲</strong>
                   <p>
-                    AI処理・マッチング・対話は、登録済みのシナリオによるシミュレーションです。専門家の回答はデモ用に準備した内容です。ナレッジグラフには人が承認してMergeした知見だけが追加されます。自由入力はキーワードで参照シナリオに振り分けます。実際のAI
+                    AI処理・マッチング・対話は、登録済みのシナリオによるシミュレーションです。専門家の回答はデモ用に準備した内容です。ナレッジグラフには人が承認してMergeした知見だけが追加されます。検索結果・想定グラフ・質問の根拠のグラフは表示中だけの一時表示で、保存しません。自由入力はキーワードで参照シナリオに振り分けます。実際のAI
                     API・社内データベース・メッセージ送信サービスには接続していません。添付ファイルの内容は解析しません。
                   </p>
                 </div>

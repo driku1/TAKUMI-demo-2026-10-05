@@ -1,4 +1,11 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ArrowRight, FileText, Maximize2, Minus, Plus, X } from "lucide-react";
 import type { Knowledge, Scenario } from "./data";
 import type { KnowledgeUsage } from "./knowledge-cycle";
@@ -17,12 +24,14 @@ import {
   placeEdgeLabels,
   stageFrameNodes,
   stageLabels,
+  textWidth,
   zones,
   buildOntology,
   type EdgeKind,
   type OntologyEdge,
   type OntologyLayer,
   type OntologyNode,
+  type OntologyProjection,
   type OntologyStage,
 } from "./ontology";
 import "./ontology-graph.css";
@@ -46,7 +55,20 @@ const edgeColors: Record<EdgeKind, string> = {
   tag: "#a3abba",
   approval: "#1f9d6b",
   usage: "#d97706",
+  search: "#0e7490",
+  expected: "#7c3aed",
+  plan: "#be185d",
 };
+/** Line samples for the temporary relations of a consultation step. */
+export const stepLineStyles: Record<
+  "search" | "expected" | "plan",
+  { color: string; dash: string }
+> = {
+  search: { color: edgeColors.search, dash: "2 5" },
+  expected: { color: edgeColors.expected, dash: "8 5" },
+  plan: { color: edgeColors.plan, dash: "2 5" },
+};
+const wrappedKinds = ["knowledge", "gap", "question", "answer"];
 const relationLegend: {
   kind: EdgeKind;
   name: string;
@@ -65,7 +87,7 @@ const relationLegend: {
   },
 ];
 
-function LineSample({
+export function LineSample({
   color,
   dash,
   width = 3,
@@ -104,6 +126,8 @@ export default function OntologyGraph({
   focusKnowledgeId,
   onArticle,
   onOpenGraph,
+  projection,
+  aside,
 }: {
   knowledge: Knowledge[];
   /** Current answer's use of registered knowledge (session only, never saved). */
@@ -115,6 +139,10 @@ export default function OntologyGraph({
   focusKnowledgeId?: string;
   onArticle?: (item: Knowledge) => void;
   onOpenGraph?: () => void;
+  /** Inline variant: a step's focused drawing (search hits, expected note, question plan). */
+  projection?: OntologyProjection;
+  /** Inline variant: list shown with the canvas instead of the connection list. */
+  aside?: ReactNode;
 }) {
   const uid = useId().replace(/:/g, "");
   const interactive = variant !== "card";
@@ -133,15 +161,21 @@ export default function OntologyGraph({
   );
   // ④ draws the answer's temporary lines on top of the approved graph.
   const full = useMemo(
-    () => ({
-      nodes: view.nodes,
-      edges:
-        view.stage === "usage" ? [...view.edges, ...view.overlayEdges] : view.edges,
-    }),
-    [view],
+    () =>
+      projection
+        ? { nodes: projection.nodes, edges: projection.edges }
+        : {
+            nodes: view.nodes,
+            edges:
+              view.stage === "usage"
+                ? [...view.edges, ...view.overlayEdges]
+                : view.edges,
+          },
+    [view, projection],
   );
-  const focusNodeId =
-    (focusKnowledgeId &&
+  const focusNodeId = projection
+    ? undefined
+    : (focusKnowledgeId &&
       view.nodes.find(
         (item) =>
           item.kind === "knowledge" && item.knowledgeId === focusKnowledgeId,
@@ -185,10 +219,15 @@ export default function OntologyGraph({
     return () => observer.disconnect();
   }, []);
 
-  const frameKey = `${scenario.id}:${view.stage}:${focusNodeId}:${size.w}x${size.h}:${view.nodes.length}`;
+  const frameKey = `${projection?.key ?? ""}:${scenario.id}:${view.stage}:${focusNodeId}:${size.w}x${size.h}:${view.nodes.length}`;
   const fitTo = (frame: OntologyNode[], reserveDetail = false) => {
     if (!size.w) return;
     const box = boundsOf(frame, variant === "card" ? 16 : 34);
+    if (variant === "inline") {
+      // Room for the caption that floats over the top of the canvas.
+      box.y -= 36;
+      box.h += 36;
+    }
     // Keep the framed nodes clear of the detail panel that opens on the right.
     const width = reserveDetail && size.w > 760 ? size.w - 350 : size.w;
     const scale = clamp(
@@ -203,9 +242,11 @@ export default function OntologyGraph({
     });
   };
   const frameNodes = () =>
-    variant === "inline" && focusNodeId
-      ? egoLayout(full, focusNodeId, view.usedNodeIds).nodes
-      : stageFrameNodes(view, scenario);
+    projection
+      ? projection.nodes
+      : variant === "inline" && focusNodeId
+        ? egoLayout(full, focusNodeId, view.usedNodeIds).nodes
+        : stageFrameNodes(view, scenario);
   useEffect(() => {
     fitTo(frameNodes(), variant === "page" && Boolean(focusNodeId) && autoSelect);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -251,21 +292,28 @@ export default function OntologyGraph({
     });
 
   // The inline view re-arranges the same nodes and relations around the note.
-  const drawn =
-    variant === "inline" && focusNodeId
+  const drawn = projection
+    ? full
+    : variant === "inline" && focusNodeId
       ? egoLayout(full, focusNodeId, view.usedNodeIds)
       : full;
-  const visibleNodes = drawn.nodes.filter((item) => layers[item.layer]);
+  const visibleNodes = projection
+    ? drawn.nodes
+    : drawn.nodes.filter((item) => layers[item.layer]);
   const visibleIds = new Set(visibleNodes.map((item) => item.id));
   const visibleEdges = drawn.edges.filter(
     (item) => visibleIds.has(item.source) && visibleIds.has(item.target),
   );
   const nodeById = new Map(drawn.nodes.map((item) => [item.id, item]));
   const selectedNode = selected ? nodeById.get(selected) : undefined;
-  const newNodes = new Set(view.newNodeIds);
-  const newEdges = new Set(view.newEdgeIds);
-  const usedNodes = new Set(view.usedNodeIds);
-  const usedEdges = new Set(view.usedEdgeIds);
+  const newNodes = new Set(projection ? [] : view.newNodeIds);
+  const newEdges = new Set(projection ? [] : view.newEdgeIds);
+  const usedNodes = new Set(projection ? [] : view.usedNodeIds);
+  const usedEdges = new Set(projection ? [] : view.usedEdgeIds);
+  // A step's own emphasis (search hits, the expected note, question bases).
+  const emphNodes = new Set(projection?.emphasisNodeIds ?? []);
+  const emphEdges = new Set(projection?.emphasisEdgeIds ?? []);
+  const tone = projection?.tone;
 
   // Reference behaviour: the selected node and its relations stay lit, the
   // rest is dimmed. Stage emphasis (NEW / USED) stays lit as well.
@@ -277,16 +325,19 @@ export default function OntologyGraph({
       .filter(
         (item) =>
           usedEdges.has(item.id) ||
+          emphEdges.has(item.id) ||
           (view.stage !== "before" && newEdges.has(item.id)) ||
           (selectedNode &&
             (item.source === selectedNode.id || item.target === selectedNode.id)),
       )
       .map((item) => item.id),
   );
-  const dimming = Boolean(selectedNode) || view.stage === "usage";
+  const dimming =
+    Boolean(selectedNode) || (!projection && view.stage === "usage");
   const litNodes = new Set<string>([
     ...selectedNeighbours,
     ...usedNodes,
+    ...(selectedNode ? [] : emphNodes),
     ...(view.stage === "usage" ? [] : newNodes),
   ]);
   if (dimming) {
@@ -308,9 +359,11 @@ export default function OntologyGraph({
     },
     activeEdges,
   );
-  const priority = (item: OntologyEdge) => stagePriority(item);
+  const priority = (item: OntologyEdge) =>
+    projection ? (emphEdges.has(item.id) ? 0 : 3) : stagePriority(item);
   const labelCandidates = visibleEdges
     .filter((item) => {
+      if (projection) return true;
       if (variant === "card") return activeEdges.has(item.id);
       if (allLabels || activeEdges.has(item.id)) return true;
       if (dimming || item.peripheral) return false;
@@ -321,6 +374,7 @@ export default function OntologyGraph({
   // Placement only depends on what is drawn, not on the camera, so panning
   // and zooming reuse it.
   const labelKey = [
+    projection?.key,
     scenario.id,
     view.stage,
     variant,
@@ -418,8 +472,8 @@ export default function OntologyGraph({
                   view.availability[value]
                     ? stageLabels[value].title
                     : value === "usage"
-                      ? "第2サイクルの関連相談で回答すると表示できます"
-                      : "第1サイクルで知見をMergeすると表示できます"
+                      ? "登録知見を使って回答すると表示できます"
+                      : "相談の回答をApprove review・Mergeすると表示できます"
                 }
                 onClick={() => chooseStage(value)}
               >
@@ -511,7 +565,13 @@ export default function OntologyGraph({
           className={`onto-canvas ${variant === "page" && selectedNode ? "has-detail" : ""}`}
           style={{ height: heights[variant] }}
         >
-          {variant !== "card" && (
+          {variant !== "card" && projection && (
+            <div className="onto-floating" aria-hidden="true">
+              <b>{projection.caption}</b>
+              <span>{projection.stats}</span>
+            </div>
+          )}
+          {variant !== "card" && !projection && (
             <div className="onto-floating" aria-hidden="true">
               <b>{nodeCopy.button}</b>
               <span>
@@ -534,7 +594,11 @@ export default function OntologyGraph({
             width={size.w || "100%"}
             height={size.h}
             role="group"
-            aria-label={`${scenario.label}の製造ナレッジ・オントロジー。${nodeCopy.title}。${counts.nodes}ノード、${counts.links}リンク`}
+            aria-label={
+              projection
+                ? `${scenario.label}の製造ナレッジ・オントロジー。${projection.caption}。${projection.stats}`
+                : `${scenario.label}の製造ナレッジ・オントロジー。${nodeCopy.title}。${counts.nodes}ノード、${counts.links}リンク`
+            }
             onPointerDown={(event) => {
               if (!interactive || (event.target as Element).closest(".onto-node"))
                 return;
@@ -636,6 +700,7 @@ export default function OntologyGraph({
                   lit ? "active" : dimming ? "dim" : "",
                   view.stage !== "before" && newEdges.has(item.id) ? "is-new" : "",
                   usedEdges.has(item.id) ? "is-used" : "",
+                  emphEdges.has(item.id) ? `is-emph tone-${tone}` : "",
                 ].join(" ");
                 return (
                   <path
@@ -654,6 +719,11 @@ export default function OntologyGraph({
                 const isUsed = usedNodes.has(item.id) && item.kind === "knowledge";
                 const isTarget = usedNodes.has(item.id) && item.kind !== "knowledge";
                 const dim = dimming && !litNodes.has(item.id);
+                const article = projection ? knowledgeOf(item) : undefined;
+                const badge =
+                  projection?.badges[item.id] ??
+                  (isUsed ? "USED 今回使用" : isNew ? "NEW" : undefined);
+                const badgeWidth = badge ? textWidth(badge, 10) + 14 : 0;
                 const titleFont = NODE_FONT.title * scale;
                 const subFont = NODE_FONT.sub * scale;
                 const typeFont = NODE_FONT.type * scale;
@@ -670,18 +740,29 @@ export default function OntologyGraph({
                       isNew ? "is-new" : "",
                       isUsed ? "is-used" : "",
                       isTarget ? "is-used-target" : "",
+                      item.hypothetical ? "is-temporary" : "",
+                      emphNodes.has(item.id) ? `is-emph tone-${tone}` : "",
                     ].join(" ")}
                     transform={`translate(${item.x} ${item.y})`}
                     role={interactive ? "button" : undefined}
                     tabIndex={interactive ? 0 : undefined}
                     aria-pressed={interactive ? selected === item.id : undefined}
-                    aria-label={interactive ? `${item.typeLabel}：${item.label}` : undefined}
-                    onClick={() => interactive && toggle(item.id)}
+                    aria-label={
+                      interactive
+                        ? `${item.typeLabel}：${item.label}${article && onArticle ? "（本文を開く）" : ""}`
+                        : undefined
+                    }
+                    onClick={() => {
+                      if (!interactive) return;
+                      if (article && onArticle) onArticle(article);
+                      else toggle(item.id);
+                    }}
                     onKeyDown={(event) => {
                       if (!interactive) return;
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        toggle(item.id);
+                        if (article && onArticle) onArticle(article);
+                        else toggle(item.id);
                       }
                     }}
                   >
@@ -708,7 +789,7 @@ export default function OntologyGraph({
                     >
                       {fitText(item.typeLabel, item.w - 18, typeFont)}
                     </text>
-                    {item.kind === "knowledge" ? (
+                    {wrappedKinds.includes(item.kind) ? (
                       wrapText(item.label, item.w - 16, titleFont).map((line, index, all) => (
                         <text
                           key={index}
@@ -732,7 +813,7 @@ export default function OntologyGraph({
                       <text
                         className="node-sub"
                         y={
-                          item.kind === "knowledge"
+                          wrappedKinds.includes(item.kind)
                             ? item.h / 2 - 9
                             : titleY + subFont + 3
                         }
@@ -741,14 +822,14 @@ export default function OntologyGraph({
                         {fitText(item.sub, item.w - 14, subFont)}
                       </text>
                     )}
-                    {(isNew || isUsed) && (
+                    {badge && (
                       <g
-                        className={`node-badge ${isUsed ? "used" : "new"}`}
+                        className={`node-badge ${tone ?? (isUsed ? "used" : "new")}`}
                         transform={`translate(${item.w / 2 - 6} ${-item.h / 2 - 9})`}
                       >
-                        <rect x={isUsed ? -60 : -34} y={-9} width={isUsed ? 66 : 40} height={18} rx={9} />
-                        <text x={isUsed ? -27 : -14} y={4}>
-                          {isUsed ? "USED 今回使用" : "NEW"}
+                        <rect x={6 - badgeWidth} y={-9} width={badgeWidth} height={18} rx={9} />
+                        <text x={6 - badgeWidth / 2} y={4}>
+                          {badge}
                         </text>
                       </g>
                     )}
@@ -905,7 +986,10 @@ export default function OntologyGraph({
             </aside>
           )}
         </div>
-        {variant === "inline" && (
+        {variant === "inline" && aside && (
+          <aside className="onto-connections onto-step-list">{aside}</aside>
+        )}
+        {variant === "inline" && !aside && (
           <aside className="onto-connections" aria-label="追加した知見の接続先">
             <strong>
               接続先 {focusConnections.length}件

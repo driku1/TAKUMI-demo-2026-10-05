@@ -87,6 +87,43 @@ try {
   await p.locator('.execution-log button', { hasText: 'Response compiled' }).click();
   check('E2 no reuse panel without merged knowledge', (await p.locator('.reuse-panel').count()) === 0);
   check('E2 answer leaves storage empty', Object.keys(await store()).length === 0);
+
+  // Step graphs on the approved ontology: temporary, never saved
+  await p.locator('.execution-log button', { hasText: 'Knowledge retrieved' }).click();
+  await p.waitForTimeout(250);
+  const resultCount = await p.locator('.retrieved-list > button').count();
+  const rankBadges = await p.locator('.step-graph .node-badge.search').count();
+  check('S1 Knowledge Search graph: one ranked card per result', rankBadges === resultCount && resultCount > 0, `${rankBadges}/${resultCount}`);
+  check('S1 Knowledge Search graph: no temporary nodes and no overlaps', (await p.locator('.step-graph .onto-node.is-temporary').count()) === 0 && clean(await overlaps('.step-graph')));
+  await p.locator('.execution-log button', { hasText: 'Experts matched' }).click();
+  await p.waitForTimeout(250);
+  const cardCount = await p.locator('.candidate-list article').count();
+  const tabs = p.locator('.expected-tabs button');
+  check('S2 Expected graph: one tab per candidate', (await tabs.count()) === cardCount && cardCount > 1, `${await tabs.count()}/${cardCount}`);
+  let everyCandidate = true;
+  const shapes = new Set();
+  for (let i = 0; i < cardCount; i++) {
+    await tabs.nth(i).click();
+    await p.waitForTimeout(150);
+    const temporary = await p.locator('.expected-preview .onto-node.is-temporary').count();
+    const caption = await p.locator('.expected-preview .onto-floating').innerText();
+    shapes.add(await p.locator('.expected-preview .onto-step-list ul').innerText());
+    if (temporary !== 1 || !caption.includes('想定') || !clean(await overlaps('.expected-preview'))) everyCandidate = false;
+  }
+  check('S2 every candidate: one unregistered expected note, labelled 想定, no overlaps', everyCandidate);
+  check('S2 candidates lead to different expected graphs', shapes.size > 1, `${shapes.size}`);
+  await p.locator('.candidate-list article').nth(1).getByRole('button', { name: /想定グラフ/ }).click();
+  await p.waitForTimeout(150);
+  check('S2 a card button selects that candidate', (await tabs.nth(1).getAttribute('aria-selected')) === 'true');
+  await p.locator('.expected-preview').screenshot({ path: `${out}/s2-expected.png` });
+  await p.locator('.execution-log button', { hasText: 'Question plan ready' }).click();
+  await p.waitForTimeout(250);
+  const plan = await p.locator('.plan-rows').innerText();
+  check('S3 Question plan graph: 3 questions, each with what is unknown', (await p.locator('.step-graph .onto-node.kind-question').count()) === 3 && (await p.locator('.plan-rows > li').count()) === 3 && (plan.match(/確認したい点/g) ?? []).length === 3);
+  check('S3 Q1 rests on retrieved note seed-2-7; Q2 on the previous answer', plan.includes('seed-2-7') && plan.includes('冷却時の収縮差による反り'));
+  check('S3 Question plan graph: referenced notes highlighted, no overlaps', (await p.locator('.step-graph .onto-node.is-emph.tone-plan').count()) >= 1 && clean(await overlaps('.step-graph')));
+  await p.locator('.step-graph').screenshot({ path: `${out}/s3-plan.png` });
+  check('S4 step graphs leave storage empty', Object.keys(await store()).length === 0);
   await gotoGraph();
   check('E2 graph: ④ unavailable, no knowledge nodes', await stageBtn('④ 回答での活用').isDisabled() && (await p.locator('.onto-page .onto-node.kind-knowledge').count()) === 0);
 
@@ -98,6 +135,26 @@ try {
   check('E3 post-merge graph lists connections', (await p.locator('.onto-connections li').count()) >= 8);
   check('E3 post-merge graph: no lead-in to a second cycle', !(await p.locator('.trace-panel').innerText()).includes('関連相談'));
   await p.locator('.merge-graph').screenshot({ path: `${out}/e3-merge-graph.png` });
+
+  // The same consultation again: answered from the merged note alone
+  const storeBeforeRepeat = await store();
+  await home();
+  await p.locator('.sample-chips button', { hasText: '樹脂成形の品質ばらつき' }).click();
+  await p.getByRole('button', { name: /Run agent/ }).click();
+  await p.locator('.run-state', { hasText: 'Answered' }).waitFor({ timeout: 15000 });
+  const repeatLog = await p.locator('.execution-log').innerText();
+  check('E3b same question: retrieved → found → interview skipped → response', ['Knowledge retrieved', 'Registered knowledge found', 'Expert interview skipped', 'Response compiled'].every((t) => repeatLog.includes(t)) && !/Experts matched|Interview started|Knowledge PR created/.test(repeatLog));
+  await p.locator('.execution-log button', { hasText: 'Knowledge retrieved' }).click();
+  await p.waitForTimeout(250);
+  check('E3b search graph ranks the merged note first', ((await p.locator('.step-graph .onto-node.kind-knowledge .node-badge').textContent()) ?? '').startsWith('1位'));
+  await p.locator('.execution-log button', { hasText: 'Response compiled' }).click();
+  const repeatPanel = await p.locator('.reuse-panel').innerText();
+  check('E3b answer cites the merged note as the same consultation', repeatPanel.includes('同じ相談の登録知見') && repeatPanel.includes(k1.id));
+  const repeatQuotes = await p.locator('.reuse-checks li.knowledge q').allInnerTexts();
+  const k1Text = [...k1.recommendations.map((r) => r.body), k1.conditions];
+  check('E3b quotes are the saved recommendations and conditions', repeatQuotes.length === k1Text.length && repeatQuotes.every((q) => k1Text.includes(q.replace(/^「|」$/g, ''))), `${repeatQuotes.length}`);
+  check('E3b no Knowledge PR and storage unchanged', (await p.getByRole('button', { name: /Open knowledge PR/ }).count()) === 0 && JSON.stringify(storeBeforeRepeat) === JSON.stringify(await store()));
+  check('E3b answer graph marks the merged note', (await p.locator('.answer-graph .onto-node.is-used').count()) === 1);
 
   // Same question after the merge: answered from approved knowledge only
   const beforeAnswer = await store();

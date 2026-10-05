@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   CheckCircle2,
@@ -17,12 +17,18 @@ import {
 import { experts, type Expert, type Knowledge, type Scenario } from "./data";
 import { buildQuestions, recommendExperts } from "./process-model";
 import {
+  answerBasis,
   buildMergedKnowledge,
   canMergeKnowledge,
   shortId,
   sourceLabel,
   type RunContext,
 } from "./knowledge-cycle";
+import {
+  ExpectedKnowledgeOntology,
+  QuestionPlanOntology,
+  RetrievalOntology,
+} from "./StepGraphs";
 import "./process-workspace.css";
 
 type Message = Scenario["dialogue"][number];
@@ -30,6 +36,9 @@ type Props = {
   query: string;
   /** Prepared run: resolved scenario, search results and first-cycle reuse. */
   run: RunContext;
+  /** Knowledge as it was when this run searched (for the step graphs). */
+  knowledge: Knowledge[];
+  onOpenGraph?: () => void;
   tick: number;
   running: boolean;
   attachments: string[];
@@ -61,10 +70,11 @@ export default function ProcessWorkspace(props: Props) {
   const { query, run, tick, running, savedId } = props;
   const { scenario, retrieval } = run;
   // Reuse is shown only when Merged knowledge was actually retrieved and cited.
-  const reused = run.cycleOne;
+  const reused = run.cited;
   // Registered knowledge and retrieved notes answer everything: no expert,
   // no interview and no new Knowledge PR.
   const knowledgeOnly = run.mode === "knowledge-only";
+  const basis = answerBasis(run);
   const cycleOneRank = run.registered
     ? retrieval.results.findIndex((result) => result.item.id === run.registered!.id)
     : -1;
@@ -75,6 +85,13 @@ export default function ProcessWorkspace(props: Props) {
   const questions = buildQuestions(scenario);
   const expert = candidates[0].expert;
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  // Expert Matching: whose expected knowledge graph is shown.
+  const [expectedFor, setExpectedFor] = useState<number | null>(null);
+  const expectedRef = useRef<HTMLElement>(null);
+  const expectedCandidate =
+    candidates.find((candidate) => candidate.expert.id === expectedFor) ??
+    candidates.find((candidate) => candidate.selected) ??
+    candidates[0];
   const [selectedStep, setSelectedStep] = useState(0);
   const [followExecution, setFollowExecution] = useState(true);
   const [followup, setFollowup] = useState("");
@@ -131,7 +148,7 @@ export default function ProcessWorkspace(props: Props) {
         sourceIds: retrieval.results.map((result) => result.item.id),
         extraDialogue: props.extraMessages,
         reviewComment,
-        basedOn: run.cycleOne,
+        basedOn: run.cited,
       }),
     );
   };
@@ -174,7 +191,7 @@ export default function ProcessWorkspace(props: Props) {
       id: "skipped",
       tick: 1,
       title: "Expert interview skipped",
-      body: "登録知見と既存ナレッジで回答可能",
+      body: `${basis}で回答可能`,
       step: 1,
     },
     {
@@ -420,15 +437,21 @@ export default function ProcessWorkspace(props: Props) {
                 <dd>{retrieval.expanded.join(" / ")}</dd>
               </dl>
               <p className="trace-note">
-                タグ一致4点・タイトル一致3点・要約一致1点の合計で並べ替え。AIの確信度ではありません。
+                タグ一致4点・タイトル一致3点・要約一致1点の合計で並べ替え（同点は新しくMergeした知見が先）。AIの確信度ではありません。
               </p>
               <h3 className="trace-section-heading">
                 <Network size={16} /> Retrieval graph
+                <small>製造ナレッジ・オントロジー上の検索結果（一時表示）</small>
               </h3>
-              <RetrievedGraph
-                retrieval={retrieval}
-                onArticle={props.onArticle}
-              />
+              <div className="step-graph">
+                <RetrievalOntology
+                  knowledge={props.knowledge}
+                  scenario={scenario}
+                  retrieval={retrieval}
+                  onArticle={props.onArticle}
+                  onOpenGraph={props.onOpenGraph}
+                />
+              </div>
               {reused && (
                 <div className="cycle-callout used" role="status">
                   <RefreshCcw size={16} />
@@ -443,7 +466,7 @@ export default function ProcessWorkspace(props: Props) {
                     </p>
                     {knowledgeOnly && (
                       <p>
-                        登録知見と既存ナレッジで確認事項をすべて根拠つきで示せるため、専門家の選定・インタビューは行いません。
+                        {basis}で確認事項をすべて根拠つきで示せるため、専門家の選定・インタビューは行いません。
                       </p>
                     )}
                   </div>
@@ -455,13 +478,13 @@ export default function ProcessWorkspace(props: Props) {
                   <button
                     key={result.item.id}
                     className={
-                      result.item.id === run.cycleOne?.id ? "cycle-one-hit" : ""
+                      result.item.id === run.cited?.id ? "cycle-one-hit" : ""
                     }
                     onClick={() => props.onArticle(result.item)}
                   >
                     <span className="retrieved-rank">{index + 1}</span>
                     <div>
-                      {result.item.id === run.cycleOne?.id && (
+                      {result.item.id === run.cited?.id && (
                         <em className="cycle-one-tag">登録知見（Merge済み）</em>
                       )}
                       <strong>{result.item.title}</strong>
@@ -486,7 +509,7 @@ export default function ProcessWorkspace(props: Props) {
           {activeStep === 1 && knowledgeOnly && (
             <div className="skip-panel">
               <p className="trace-intro">
-                登録知見と既存ナレッジで、今回の確認事項をすべて根拠つきで示せます。そのため、専門家の選定・質問生成・インタビューと、新しい知見の登録PRは行いません。
+                {basis}で、今回の確認事項をすべて根拠つきで示せます。そのため、専門家の選定・質問生成・インタビューと、新しい知見の登録PRは行いません。
               </p>
               <ul className="skip-coverage">
                 {run.checks.map((check) => (
@@ -550,15 +573,65 @@ export default function ProcessWorkspace(props: Props) {
                         ))}
                       </details>
                     )}
-                    <button
-                      className="text-button"
-                      onClick={() => props.onExpert(candidate.expert)}
-                    >
-                      View profile <ChevronRight size={14} />
-                    </button>
+                    <div className="candidate-actions">
+                      <button
+                        className="text-button"
+                        onClick={() => props.onExpert(candidate.expert)}
+                      >
+                        View profile <ChevronRight size={14} />
+                      </button>
+                      <button
+                        className="text-button"
+                        aria-pressed={expectedCandidate?.expert.id === candidate.expert.id}
+                        onClick={() => {
+                          setExpectedFor(candidate.expert.id);
+                          expectedRef.current?.scrollIntoView({
+                            behavior: "smooth",
+                            block: "nearest",
+                          });
+                        }}
+                      >
+                        <Network size={14} /> 想定グラフ
+                      </button>
+                    </div>
                   </article>
                 ))}
               </div>
+              {expectedCandidate && (
+                <section
+                  ref={expectedRef}
+                  className="expected-preview"
+                  aria-label="インタビュー後の想定ナレッジグラフ"
+                >
+                  <h3 className="trace-section-heading">
+                    <Network size={16} /> Expected knowledge graph
+                    <small>候補者にインタビューした場合に追加が想定される知見と接続先（想定・保存しません）</small>
+                  </h3>
+                  <div className="expected-tabs" role="tablist" aria-label="候補者">
+                    {candidates.map((candidate, index) => (
+                      <button
+                        key={candidate.expert.id}
+                        role="tab"
+                        aria-selected={candidate.expert.id === expectedCandidate.expert.id}
+                        onClick={() => setExpectedFor(candidate.expert.id)}
+                      >
+                        <span>0{index + 1}</span>
+                        {candidate.expert.name}
+                        {candidate.selected && <em>対話担当</em>}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="step-graph">
+                    <ExpectedKnowledgeOntology
+                      knowledge={props.knowledge}
+                      scenario={scenario}
+                      candidate={expectedCandidate}
+                      onArticle={props.onArticle}
+                      onOpenGraph={props.onOpenGraph}
+                    />
+                  </div>
+                </section>
+              )}
               <div className="trace-gap">
                 <strong>Interview request</strong>
                 <p>宛先：{expert.name}（模擬）</p>
@@ -578,6 +651,24 @@ export default function ProcessWorkspace(props: Props) {
               <p className="trace-intro">
                 検索結果から初回質問を作成し、匠の回答を受け取るごとに追加質問を生成します。生成根拠と質問の狙いを確認できます。
               </p>
+              {visibleQuestions.length > 0 && (
+                <>
+                  <h3 className="trace-section-heading">
+                    <Network size={16} /> Question rationale graph
+                    <small>どの知見から、何が未確認と判断し、どの質問を作ったか（一時表示）</small>
+                  </h3>
+                  <div className="step-graph">
+                    <QuestionPlanOntology
+                      knowledge={props.knowledge}
+                      scenario={scenario}
+                      retrieval={retrieval}
+                      questions={visibleQuestions}
+                      onArticle={props.onArticle}
+                      onOpenGraph={props.onOpenGraph}
+                    />
+                  </div>
+                </>
+              )}
               <div className="question-cards">
                 {visibleQuestions.map((question, index) => (
                   <article key={question.id}>
@@ -733,7 +824,7 @@ export default function ProcessWorkspace(props: Props) {
                       <span>Knowledge reuse · 登録知見の活用</span>
                       <strong>
                         {knowledgeOnly
-                          ? `登録知見と既存ナレッジだけで回答（確認事項${run.checks.length}件）`
+                          ? `${basis}だけで回答（確認事項${run.checks.length}件）`
                           : `登録知見を${run.checks.filter((check) => check.usesKnowledge).length}件の確認事項に使用`}
                       </strong>
                     </div>
@@ -778,7 +869,7 @@ export default function ProcessWorkspace(props: Props) {
                                 : "今回の対話で追加"}
                           </em>
                         </div>
-                        <p>{check.appliedAs}</p>
+                        {check.appliedAs && <p>{check.appliedAs}</p>}
                         <ul>
                           {check.sources.map((source, index) => (
                             <li key={index} className={source.kind}>
@@ -796,7 +887,7 @@ export default function ProcessWorkspace(props: Props) {
                   </ol>
                   <p className="trace-note">
                     {knowledgeOnly
-                      ? "引用は、ブラウザに保存された登録知見と既存ナレッジの本文から取得しています。今回は専門家への確認を行っていません。"
+                      ? `引用は、ブラウザに保存された${basis}の本文から取得しています。今回は専門家への確認を行っていません。`
                       : "引用はブラウザに保存された登録知見の本文から取得しています。専門家の回答はデモ用に準備した内容で、AIの生成結果ではありません。"}
                   </p>
                   {props.renderAnswerGraph && (
@@ -963,10 +1054,10 @@ export default function ProcessWorkspace(props: Props) {
                         .map((result) => result.item.id)
                         .join(", ")}
                     </p>
-                    {run.cycleOne && (
+                    {run.cited && (
                       <p>
-                        発展元（参照した登録知見）：{run.cycleOne.title}（
-                        {shortId(run.cycleOne.id)}）。上書きせず、新しいノートとして追加します。
+                        発展元（参照した登録知見）：{run.cited.title}（
+                        {shortId(run.cited.id)}）。上書きせず、新しいノートとして追加します。
                       </p>
                     )}
                     <p>
@@ -1110,102 +1201,6 @@ export default function ProcessWorkspace(props: Props) {
             </>
           )}
         </section>
-      </div>
-    </div>
-  );
-}
-
-function RetrievedGraph({
-  retrieval,
-  onArticle,
-}: {
-  retrieval: RunContext["retrieval"];
-  onArticle: (item: Knowledge) => void;
-}) {
-  const topics = [
-    ...new Set(retrieval.results.flatMap((result) => result.matched)),
-  ];
-  const topicY = (index: number) =>
-    30 + (index * 240) / Math.max(topics.length - 1, 1);
-  return (
-    <div className="retrieval-graph">
-      <svg
-        viewBox="0 0 840 300"
-        role="group"
-        aria-label="検索語と取得ナレッジの関係グラフ"
-      >
-        {topics.map((term, index) => (
-          <g key={term}>
-            <path
-              d={`M 165 150 C 220 150 220 ${topicY(index)} 280 ${topicY(index)}`}
-              className="retrieval-edge"
-            />
-            {retrieval.results.map(
-              (result, resultIndex) =>
-                result.matched.includes(term) && (
-                  <path
-                    key={result.item.id}
-                    d={`M 415 ${topicY(index)} C 480 ${topicY(index)} 480 ${32 + resultIndex * 46} 555 ${32 + resultIndex * 46}`}
-                    className="retrieval-edge"
-                  />
-                ),
-            )}
-          </g>
-        ))}
-        <rect
-          x="20"
-          y="125"
-          width="145"
-          height="50"
-          rx="7"
-          className="graph-query-node"
-        />
-        <text x="92" y="155" textAnchor="middle" className="graph-query-text">
-          入力された質問
-        </text>
-        {topics.map((term, index) => (
-          <g key={term}>
-            <rect
-              x="280"
-              y={topicY(index) - 18}
-              width="135"
-              height="36"
-              rx="6"
-              className="graph-term-node"
-            />
-            <text x="347" y={topicY(index) + 5} textAnchor="middle">
-              {term}
-            </text>
-          </g>
-        ))}
-        {retrieval.results.map((result, index) => (
-          <g
-            key={result.item.id}
-            role="button"
-            tabIndex={0}
-            aria-label={`検索結果${index + 1}：${result.item.title}`}
-            onClick={() => onArticle(result.item)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onArticle(result.item);
-              }
-            }}
-            className="graph-result-node"
-          >
-            <rect x="555" y={14 + index * 46} width="270" height="36" rx="6" />
-            <text x="568" y={37 + index * 46}>
-              {index + 1}.{" "}
-              {result.item.title.length > 18
-                ? `${result.item.title.slice(0, 18)}…`
-                : result.item.title}
-            </text>
-          </g>
-        ))}
-      </svg>
-      <div>
-        質問 <ChevronRight size={12} /> 一致した検索語{" "}
-        <ChevronRight size={12} /> 取得記事 · 記事を選択して本文を表示
       </div>
     </div>
   );

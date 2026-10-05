@@ -828,3 +828,143 @@
     max-height: none;
   }
 }
+
+/* Consultation steps (Knowledge Search / Expert Matching / Question Plan):
+   focused drawings of the approved ontology plus temporary items that are
+   never saved. Dotted or dashed lines are temporary; solid lines are
+   approved relations. */
+.onto {
+  --onto-search: #0e7490;
+  --onto-expected: #7c3aed;
+  --onto-plan: #be185d;
+}
+.onto-edge.kind-search,
+.onto-edge.kind-plan {
+  stroke-dasharray: 2 5;
+  stroke-linecap: round;
+}
+.onto-edge.kind-expected {
+  stroke-dasharray: 8 5;
+}
+.onto-edge.is-emph {
+  stroke-width: 2.8;
+  opacity: 1;
+}
+.onto-edge.is-emph.tone-search {
+  stroke: var(--onto-search) !important;
+}
+.onto-edge.is-emph.tone-expected {
+  stroke: var(--onto-expected) !important;
+}
+.onto-edge.is-emph.tone-plan {
+  stroke: var(--onto-plan) !important;
+}
+.onto-edge-label.kind-search rect {
+  fill: #ecfeff;
+  stroke: var(--onto-search);
+}
+.onto-edge-label.kind-search text {
+  fill: #155e75;
+}
+.onto-edge-label.kind-expected rect {
+  fill: #f5f3ff;
+  stroke: var(--onto-expected);
+}
+.onto-edge-label.kind-expected text {
+  fill: #5b21b6;
+}
+.onto-edge-label.kind-plan rect {
+  fill: #fdf2f8;
+  stroke: var(--onto-plan);
+}
+.onto-edge-label.kind-plan text {
+  fill: #9d174d;
+}
+.onto-node.is-emph.tone-search .outer {
+  stroke: var(--onto-search) !important;
+  stroke-width: 2.8 !important;
+}
+.onto-node.is-emph.tone-plan .outer {
+  stroke: var(--onto-plan) !important;
+  stroke-width: 3 !important;
+  filter: drop-shadow(0 0 6px rgba(190, 24, 93, 0.25));
+}
+/* Temporary nodes: not part of the ontology. */
+.onto-node.is-temporary .outer {
+  stroke-dasharray: 6 4;
+  stroke-width: 2 !important;
+}
+.onto-node.kind-knowledge.is-temporary .outer {
+  fill: #faf7ff;
+  stroke: var(--onto-expected) !important;
+  filter: none;
+}
+.onto-node.kind-knowledge.is-temporary .node-type {
+  fill: #5b21b6;
+}
+.onto-node.kind-gap .outer {
+  fill: #fff7fb;
+  stroke: var(--onto-plan);
+}
+.onto-node.kind-question .outer {
+  fill: #fff;
+  stroke: var(--onto-plan);
+}
+.onto-node.kind-answer .outer {
+  fill: #f8f7fa;
+  stroke: #9a93a8;
+}
+.onto-node.kind-gap .node-type,
+.onto-node.kind-question .node-type {
+  fill: #9d174d;
+}
+.onto-node.kind-answer .node-type {
+  fill: #6f6a7b;
+}
+.node-badge.search rect {
+  fill: var(--onto-search);
+}
+.node-badge.expected rect {
+  fill: var(--onto-expected);
+}
+.node-badge.plan rect {
+  fill: var(--onto-plan);
+}
+.onto-step-list {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.onto-step-list > strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.onto-step-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0 0 10px;
+  color: var(--onto-muted);
+  font-size: 11px;
+}
+.onto-step-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.onto-step-list .onto-step-note {
+  margin: 8px 0 0;
+  color: var(--onto-muted);
+  font-size: 11px;
+}
+@media (max-width: 760px) {
+  .onto-inline .onto-floating {
+    flex-wrap: wrap;
+    justify-content: center;
+    width: max-content;
+    max-width: calc(100% - 24px);
+    border-radius: 12px;
+    white-space: normal;
+    text-align: center;
+  }
+}

@@ -1,10 +1,12 @@
 import {
   experts,
+  baseScenarioOf,
   followUpOf,
   initialKnowledge,
   scenarios,
   allScenarios,
   type BaseScenarioId,
+  type Expert,
   type Knowledge,
   type Scenario,
 } from "./data.ts";
@@ -42,7 +44,11 @@ export type NodeKind =
   | "issue"
   | "topic"
   | "document"
-  | "knowledge";
+  | "knowledge"
+  // Temporary nodes of a consultation step (never part of the ontology).
+  | "gap"
+  | "question"
+  | "answer";
 export type Phase = "cycle1" | "cycle2";
 
 export type OntologyNode = {
@@ -62,6 +68,8 @@ export type OntologyNode = {
   cluster?: BaseScenarioId;
   knowledgeId?: string;
   phase?: Phase;
+  /** Expected-knowledge previews only: a note that does not exist yet. */
+  hypothetical?: boolean;
 };
 
 /** Relation families shown in the legend. None of them expresses causation. */
@@ -71,7 +79,10 @@ export type EdgeKind =
   | "reference"
   | "tag"
   | "approval"
-  | "usage";
+  | "usage"
+  | "search"
+  | "expected"
+  | "plan";
 
 export type OntologyEdge = {
   id: string;
@@ -95,6 +106,9 @@ export const edgeKindLabels: Record<EdgeKind, string> = {
   tag: "タグ一致・本文で言及（因果ではない）",
   approval: "承認（Approve review）",
   usage: "今回の回答で使用（④の重ね表示・保存しない）",
+  search: "検索語一致（検索結果の一時表示・因果ではない）",
+  expected: "インタビュー後の想定（未登録・保存しない）",
+  plan: "質問計画（既存知見 → 確認したい点 → 質問・一時表示）",
 };
 
 export const stageLabels: Record<
@@ -767,11 +781,14 @@ export function buildOntology({
   const base = baseFor(cluster.id);
   const first = cycleOneKnowledge(knowledge, baseScenario);
   const second = cycleTwoKnowledge(knowledge, followUp);
+  // Registered notes are drawn as knowledge-1 (the theme's first consultation)
+  // and knowledge-2 (its related consultation).
+  const knowledgeNodeId = (id: string) =>
+    id === first?.id ? "knowledge-1" : id === second?.id ? "knowledge-2" : undefined;
   const usage =
     overlay &&
-    first &&
     latestUsageFor([overlay], knowledge, baseScenario) &&
-    overlay.usedKnowledge.some((item) => item.id === first.id)
+    overlay.usedKnowledge.every((item) => knowledgeNodeId(item.id))
       ? overlay
       : undefined;
   const availability: Record<OntologyStage, boolean> = {
@@ -910,7 +927,7 @@ export function buildOntology({
   if (stage === "usage" && usage) {
     const sourceNode = (source: KnowledgeUsage["checks"][number]["sources"][number]) =>
       source.kind === "knowledge"
-        ? "knowledge-1"
+        ? knowledgeNodeId(source.knowledgeId)
         : source.kind === "document"
           ? `doc-${source.knowledgeId}`
           : undefined;
@@ -923,7 +940,11 @@ export function buildOntology({
     ];
     usedNodeIds.push(...sources);
     const links: { source: string; target: string; label: string }[] = [];
-    for (const issue of issueIds(followUp.followUp!.issue)) {
+    // The issue the question was about: the related consultation's issue, or
+    // the theme's first issue when the first consultation was asked again.
+    const asked = allScenarios.find((item) => item.id === usage.scenarioId);
+    const askedIssue = asked?.followUp?.issue ?? cluster.issues[0].label;
+    for (const issue of issueIds(askedIssue)) {
       for (const source of sources) {
         links.push({ source, target: issue, label: "今回の質問に使用" });
       }
@@ -993,7 +1014,11 @@ export function buildOntology({
     usedEdgeIds: [...usedEdgeIds, ...overlayEdges.map((item) => item.id)],
     overlayEdges,
     focusNodeId:
-      stage === "focus" ? latestNodeId : stage === "usage" ? "knowledge-1" : undefined,
+      stage === "focus"
+        ? latestNodeId
+        : stage === "usage" && usage
+          ? knowledgeNodeId(usage.usedKnowledge[0].id)
+          : undefined,
     registered,
     usage: stage === "usage" ? usage : undefined,
     availability,
@@ -1040,7 +1065,7 @@ export function stageFrameNodes(view: OntologyView, scenario: Scenario) {
     neighbours(view, id).forEach((item) => ids.add(item));
   if (view.stage === "usage") {
     view.usedNodeIds.forEach((id) => ids.add(id));
-    addNeighbourhood("knowledge-1");
+    if (view.focusNodeId) addNeighbourhood(view.focusNodeId);
   } else if (view.focusNodeId) {
     addNeighbourhood(view.focusNodeId);
   } else {
@@ -1259,5 +1284,638 @@ export function egoLayout(
     edges: view.edges.filter(
       (item) => placedIds.has(item.source) && placedIds.has(item.target),
     ),
+  };
+}
+
+/**
+ * A focused drawing of part of the approved ontology for one step of a
+ * consultation, plus temporary lines that are never saved: search hits
+ * (Knowledge Search) or an expected note (Expert Matching).
+ */
+export type OntologyProjection = {
+  key: string;
+  tone: "search" | "expected" | "plan";
+  nodes: OntologyNode[];
+  edges: OntologyEdge[];
+  emphasisNodeIds: string[];
+  emphasisEdgeIds: string[];
+  /** Short text shown on a node's corner (rank, 想定, 相談の課題). */
+  badges: Record<string, string>;
+  caption: string;
+  stats: string;
+};
+
+type Retrieval = ReturnType<typeof retrieveKnowledge>;
+
+const clusterDefOf = (scenario: Scenario) =>
+  clusterDefs.find((item) => item.id === baseScenarioOf(scenario).id)!;
+
+/** Issue node of the question: the related question's issue or the theme's first. */
+function askedIssueId(cluster: ClusterDef, scenario: Scenario) {
+  const label = scenario.followUp?.issue ?? cluster.issues[0].label;
+  const index = Math.max(
+    0,
+    cluster.issues.findIndex((issue) => issue.label === label),
+  );
+  return `issue-${cluster.id}-${index}`;
+}
+
+/**
+ * Ontology node a search term belongs to: a 技術・観点 whose stem it contains,
+ * else a 課題 whose keyword matches, else the theme's 工程領域.
+ */
+export function conceptForTerm(cluster: ClusterDef, term: string): string {
+  const topic = cluster.topics.find((item) =>
+    item.stems.some((stem) => term.includes(stem)),
+  );
+  if (topic) return `topic-${cluster.id}-${topic.label}`;
+  const issue = cluster.issues.findIndex((item) =>
+    item.keywords.some((word) => term.includes(word) || word.includes(term)),
+  );
+  if (issue >= 0) return `issue-${cluster.id}-${issue}`;
+  return `domain-${cluster.id}`;
+}
+
+const unique = <T,>(items: T[]) => [...new Set(items)];
+
+export type RetrievalProjection = OntologyProjection & {
+  /** Search term → the node it was drawn to. */
+  terms: { term: string; nodeId: string; label: string; typeLabel: string }[];
+  /** Results without a node in this theme's graph (listed, not drawn). */
+  outside: { rank: number; id: string; title: string }[];
+  /** Theme-wide words shown on the cards instead of as lines. */
+  themeTerms: string[];
+  /** Node id of each drawn result, by knowledge ID. */
+  hitNodeIds: Record<string, string>;
+};
+
+/**
+ * Knowledge Search: the retrieved notes on the approved ontology. Concepts
+ * (課題・観点・工程領域) are on the left, results on the right in rank order.
+ * A result is linked to the concept of each matched term: an approved
+ * relation between them is highlighted, otherwise a temporary 検索語一致
+ * line is drawn. Word matches only; nothing here expresses causation.
+ */
+export function retrievalProjection({
+  knowledge,
+  scenario,
+  retrieval,
+}: {
+  knowledge: Knowledge[];
+  scenario: Scenario;
+  retrieval: Retrieval;
+}): RetrievalProjection {
+  const view = buildOntology({ knowledge, scenario, stage: "after" });
+  const cluster = clusterDefOf(scenario);
+  const byId = new Map(view.nodes.map((item) => [item.id, item]));
+  const anchorId = askedIssueId(cluster, scenario);
+  const hits = retrieval.results.map((result, index) => ({
+    result,
+    rank: index + 1,
+    nodeId: view.nodes.find(
+      (item) =>
+        (item.kind === "document" || item.kind === "knowledge") &&
+        item.knowledgeId === result.item.id,
+    )?.id,
+  }));
+  const drawn = hits.filter((hit) => hit.nodeId);
+  const conceptTerms = new Map<string, string[]>();
+  const links = new Map<string, { note: string; concept: string; terms: string[] }>();
+  const domainId = `domain-${cluster.id}`;
+  for (const hit of drawn) {
+    const concepts = hit.result.matched.map((term) => ({
+      term,
+      concept: conceptForTerm(cluster, term),
+    }));
+    // Theme-wide words (射出成形 …) go to the 工程領域 only when nothing more
+    // specific matched, so they do not crowd the drawing; the card lists them.
+    const specific = concepts.some((item) => item.concept !== domainId);
+    for (const { term, concept } of concepts) {
+      if (specific && concept === domainId) continue;
+      conceptTerms.set(concept, unique([...(conceptTerms.get(concept) ?? []), term]));
+      const key = `${hit.nodeId}>${concept}`;
+      const link = links.get(key) ?? { note: hit.nodeId!, concept, terms: [] };
+      link.terms = unique([...link.terms, term]);
+      links.set(key, link);
+    }
+  }
+  const rankOf = new Map(drawn.map((hit) => [hit.nodeId!, hit.rank]));
+  const barycenter = (id: string) => {
+    const ranks = [...links.values()]
+      .filter((link) => link.concept === id)
+      .map((link) => rankOf.get(link.note)!);
+    return ranks.length ? ranks.reduce((a, b) => a + b, 0) / ranks.length : 0;
+  };
+  const conceptIds = unique([anchorId, ...conceptTerms.keys()])
+    .filter((id) => byId.has(id))
+    .sort((a, b) => barycenter(a) - barycenter(b));
+
+  // Results in rank order on the right, concepts next to the results they explain.
+  const noteWidth = 236;
+  const conceptWidth = 160;
+  const noteX = conceptWidth / 2 + 250 + noteWidth / 2;
+  const nodes: OntologyNode[] = [];
+  const noteY = new Map<string, number>();
+  let y = 0;
+  for (const hit of drawn) {
+    const source = byId.get(hit.nodeId!)!;
+    const h = source.kind === "knowledge" ? 74 : 50;
+    nodes.push({
+      ...source,
+      x: noteX,
+      y: y + h / 2,
+      w: noteWidth,
+      h,
+      sub: `一致：${hit.result.matched.join("・")}`,
+    });
+    noteY.set(source.id, y + h / 2);
+    y += h + 14;
+  }
+  let bottom = -Infinity;
+  for (const id of conceptIds) {
+    const source = byId.get(id)!;
+    const ys = [...links.values()]
+      .filter((link) => link.concept === id)
+      .map((link) => noteY.get(link.note)!);
+    const target = ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : 26;
+    const h = 52;
+    const cy = Math.max(target, bottom + 22 + h / 2);
+    bottom = cy + h / 2;
+    const terms = conceptTerms.get(id);
+    nodes.push({
+      ...source,
+      x: 0,
+      y: cy,
+      w: conceptWidth,
+      h,
+      sub: terms ? `検索語：${terms.join("・")}` : "今回の相談の課題",
+    });
+  }
+
+  const nodeIds = new Set(nodes.map((item) => item.id));
+  const noteIds = new Set(drawn.map((hit) => hit.nodeId!));
+  const edges: OntologyEdge[] = [];
+  const emphasisEdgeIds: string[] = [];
+  for (const link of links.values()) {
+    if (!nodeIds.has(link.concept)) continue;
+    const existing = view.edges.find(
+      (item) =>
+        (item.source === link.note && item.target === link.concept) ||
+        (item.target === link.note && item.source === link.concept),
+    );
+    if (existing) {
+      edges.push({ ...existing, peripheral: false });
+      emphasisEdgeIds.push(existing.id);
+    } else {
+      const id = `search:${link.note}>${link.concept}`;
+      edges.push({
+        id,
+        source: link.note,
+        target: link.concept,
+        kind: "search",
+        label: `検索語一致：${link.terms.join("・")}`,
+      });
+      emphasisEdgeIds.push(id);
+    }
+  }
+  // Other approved relations between a result and a drawn concept (e.g. 対象課題).
+  for (const item of view.edges) {
+    if (edges.some((edge) => edge.id === item.id)) continue;
+    const crosses =
+      (noteIds.has(item.source) && conceptIds.includes(item.target)) ||
+      (conceptIds.includes(item.source) && noteIds.has(item.target));
+    if (crosses) edges.push({ ...item, peripheral: false });
+  }
+
+  const badges: Record<string, string> = Object.fromEntries(
+    drawn.map((hit) => [hit.nodeId!, `${hit.rank}位 · ${hit.result.score}点`]),
+  );
+  if (!conceptTerms.has(anchorId)) badges[anchorId] = "相談の課題";
+  const outside = hits
+    .filter((hit) => !hit.nodeId)
+    .map((hit) => ({ rank: hit.rank, id: hit.result.item.id, title: hit.result.item.title }));
+  return {
+    key: `search:${scenario.id}:${retrieval.results.map((result) => result.item.id).join(",")}`,
+    tone: "search",
+    nodes,
+    edges,
+    emphasisNodeIds: [...noteIds, ...conceptTerms.keys()].filter((id) => nodeIds.has(id)),
+    emphasisEdgeIds,
+    badges,
+    caption: "検索結果の位置",
+    stats: `検索結果${retrieval.results.length}件（グラフ上${drawn.length}件）· 語の一致${links.size}本（一時表示）`,
+    themeTerms: unique(
+      drawn.flatMap((hit) =>
+        hit.result.matched.filter(
+          (term) => conceptForTerm(cluster, term) === domainId,
+        ),
+      ),
+    ).filter((term) => !conceptTerms.get(domainId)?.includes(term)),
+    terms: [...conceptTerms.entries()].flatMap(([nodeId, terms]) =>
+      terms.map((term) => ({
+        term,
+        nodeId,
+        label: byId.get(nodeId)?.label ?? nodeId,
+        typeLabel: byId.get(nodeId)?.typeLabel ?? "",
+      })),
+    ),
+    outside,
+    hitNodeIds: Object.fromEntries(
+      drawn.map((hit) => [hit.result.item.id, hit.nodeId!]),
+    ),
+  };
+}
+
+export type ExpertCandidate = {
+  expert: Expert;
+  /** The expert's 専門領域 tags that are also search terms. */
+  matched: string[];
+  /** Retrieved notes the expert wrote. */
+  sources: { item: Knowledge }[];
+  selected: boolean;
+};
+
+export type ExpectedProjection = OntologyProjection & {
+  expert: Expert;
+  connections: { label: string; target: string; typeLabel: string }[];
+  basis: string[];
+};
+
+/**
+ * Expert Matching: the note an interview with this candidate is expected to
+ * add, and where it would connect, drawn around the note. Built from the
+ * candidate's 専門領域 tags, the description of their work and the retrieved
+ * notes they wrote: a preview, not a prediction of the answer. Nothing is
+ * added to the ontology until a reviewed PR is Merged.
+ */
+export function expectedKnowledgeProjection({
+  knowledge,
+  scenario,
+  candidate,
+}: {
+  knowledge: Knowledge[];
+  scenario: Scenario;
+  candidate: ExpertCandidate;
+}): ExpectedProjection {
+  const view = buildOntology({ knowledge, scenario, stage: "after" });
+  const cluster = clusterDefOf(scenario);
+  const byId = new Map(view.nodes.map((item) => [item.id, item]));
+  const { expert } = candidate;
+  const anchorId = askedIssueId(cluster, scenario);
+  const anchor = byId.get(anchorId)!;
+  const expectedId = `expected-${expert.id}`;
+  const nodes: OntologyNode[] = [
+    node({
+      id: expectedId,
+      kind: "knowledge",
+      layer: "registered",
+      typeLabel: "想定される知見（未登録）",
+      label: `${anchor.label}の判断基準`,
+      sub: `${expert.name}へのインタビュー後`,
+      x: 0,
+      y: 0,
+      w: 230,
+      h: 74,
+      cluster: cluster.id,
+      hypothetical: true,
+      desc: "インタビュー前の想定です。登録PRをApprove・Mergeするまでグラフには入りません。",
+    }),
+  ];
+  const edges: OntologyEdge[] = [];
+  const connect = (target: string, label: string, kind: EdgeKind = "expected") => {
+    const id = `expected:${expectedId}>${target}`;
+    if (edges.some((item) => item.id === id)) return;
+    edges.push({ id, source: expectedId, target, kind, label });
+  };
+
+  // The candidate: their node in the organization ontology, or their directory entry.
+  const personId = personIdByName(expert.name);
+  if (personId) {
+    nodes.push({ ...byId.get(personId)!, peripheral: undefined } as OntologyNode);
+    const team = view.edges.find(
+      (item) => item.source === personId && item.label === "所属",
+    );
+    if (team) {
+      nodes.push({ ...byId.get(team.target)! });
+      edges.push({ ...team });
+    }
+  } else {
+    nodes.push(
+      node({
+        id: `candidate-${expert.id}`,
+        kind: "person",
+        layer: "org",
+        typeLabel: "匠 / Person（名簿）",
+        label: expert.name,
+        sub: expert.role.split(" / ")[0],
+        x: 0,
+        y: 0,
+        w: 128,
+        h: 54,
+        desc: expert.focus,
+      }),
+    );
+  }
+  const candidateId = personId ?? `candidate-${expert.id}`;
+  edges.push({
+    id: `expected:${candidateId}>${expectedId}`,
+    source: candidateId,
+    target: expectedId,
+    kind: "expected",
+    label: "回答者（想定）",
+  });
+
+  nodes.push({ ...anchor });
+  connect(anchorId, "対象課題（想定）");
+  // 確認観点: the theme's topics named in the candidate's tags or work, and the
+  // concepts of the tags that matched the search.
+  const profile = `${expert.tags.join(" ")} ${expert.focus}`;
+  const concepts = unique([
+    ...cluster.topics
+      .filter((topic) => topic.stems.some((stem) => profile.includes(stem)))
+      .map((topic) => `topic-${cluster.id}-${topic.label}`),
+    ...candidate.matched.map((term) => conceptForTerm(cluster, term)),
+  ]).filter((id) => id !== anchorId && byId.has(id));
+  for (const id of concepts) {
+    nodes.push({ ...byId.get(id)! });
+    const kind = byId.get(id)!.kind;
+    connect(
+      id,
+      kind === "topic"
+        ? "確認観点（想定）"
+        : kind === "domain"
+          ? "工程領域（想定）"
+          : "関連課題（想定）",
+    );
+  }
+  // 参照候補: retrieved notes the candidate wrote (the best-ranked few are drawn).
+  const ownNotes = candidate.sources.flatMap((source) => {
+    const noteId = view.nodes.find(
+      (item) =>
+        (item.kind === "document" || item.kind === "knowledge") &&
+        item.knowledgeId === source.item.id,
+    )?.id;
+    return noteId ? [noteId] : [];
+  });
+  const drawnNotes = ownNotes.slice(0, 4);
+  for (const noteId of drawnNotes) {
+    nodes.push({ ...byId.get(noteId)! });
+    connect(noteId, "参照候補（想定）");
+  }
+
+  const placed = egoLayout(
+    { nodes, edges },
+    expectedId,
+    nodes.map((item) => item.id),
+  );
+  const expectedEdges = edges.filter((item) => item.kind === "expected");
+  const typeOf = (id: string) => nodes.find((item) => item.id === id)!;
+  return {
+    key: `expected:${scenario.id}:${expert.id}`,
+    tone: "expected",
+    nodes: placed.nodes,
+    edges: placed.edges,
+    emphasisNodeIds: [expectedId],
+    emphasisEdgeIds: expectedEdges.map((item) => item.id),
+    badges: { [expectedId]: "想定" },
+    caption: `${expert.name}にインタビューした場合（想定）`,
+    stats: `想定される接続${expectedEdges.length}本（未登録・保存しない）`,
+    expert,
+    connections: expectedEdges.map((item) => {
+      const other = typeOf(item.source === expectedId ? item.target : item.source);
+      return { label: item.label, target: other.label, typeLabel: other.typeLabel };
+    }),
+    basis: [
+      `専門領域：${expert.tags.join("・")}${candidate.matched.length ? `（探索語と一致：${candidate.matched.join("・")}）` : ""}`,
+      `検索結果のうち本人の知見：${candidate.sources.length}件${
+        ownNotes.length > drawnNotes.length
+          ? `（上位${drawnNotes.length}件を表示）`
+          : ""
+      }`,
+      ...(concepts.length
+        ? []
+        : ["このテーマの技術・観点と一致する専門領域はありません"]),
+    ],
+  };
+}
+
+export type PlannedQuestion = {
+  id: string;
+  text: string;
+  purpose: string;
+  trigger: string;
+  origin: string;
+};
+
+export type QuestionPlanRow = {
+  question: PlannedQuestion;
+  unknown: string;
+  topics: string[];
+  notes: { id: string; title: string; summary: string; rank: number }[];
+  answer?: { label: string; text: string };
+};
+
+export type QuestionPlanProjection = OntologyProjection & {
+  rows: QuestionPlanRow[];
+};
+
+/**
+ * Question Plan: why each question was generated. Retrieved notes it was
+ * based on are highlighted (same nodes as the ontology); what is still
+ * unknown and the generated question are temporary nodes. The first
+ * question comes from the search results' gap, later ones from the expert's
+ * previous answer and the note closest to the question's topics. Nothing is
+ * saved or registered as knowledge.
+ */
+export function questionPlanProjection({
+  knowledge,
+  scenario,
+  retrieval,
+  questions,
+}: {
+  knowledge: Knowledge[];
+  scenario: Scenario;
+  retrieval: Retrieval;
+  questions: PlannedQuestion[];
+}): QuestionPlanProjection {
+  const view = buildOntology({ knowledge, scenario, stage: "after" });
+  const cluster = clusterDefOf(scenario);
+  const byId = new Map(view.nodes.map((item) => [item.id, item]));
+  const expert = experts.find((item) => item.id === scenario.expertId);
+  const hits = retrieval.results.flatMap((result, index) => {
+    const nodeId = view.nodes.find(
+      (item) =>
+        (item.kind === "document" || item.kind === "knowledge") &&
+        item.knowledgeId === result.item.id,
+    )?.id;
+    return nodeId ? [{ item: result.item, rank: index + 1, nodeId }] : [];
+  });
+  const used = new Set<string>();
+  const rows: (QuestionPlanRow & { noteIds: string[]; answerIndex?: number })[] =
+    questions.map((question, index) => {
+      const first = index === 0;
+      const unknown = first ? scenario.gap : question.purpose;
+      const focus = first ? `${scenario.gap} ${question.text}` : `${question.text} ${question.trigger}`;
+      const topics = cluster.topics.filter((topic) =>
+        topic.stems.some((stem) => focus.includes(stem)),
+      );
+      const words = [
+        ...topics.flatMap((topic) => topic.stems),
+        ...cluster.issues.flatMap((issue) =>
+          issue.keywords.filter((word) => focus.includes(word)),
+        ),
+      ];
+      const score = (item: Knowledge) =>
+        words.filter((word) =>
+          `${item.title} ${item.summary} ${item.tags.join(" ")}`.includes(word),
+        ).length;
+      const ranked = hits
+        .map((hit) => ({ ...hit, score: score(hit.item) }))
+        .filter((hit) => hit.score > 0)
+        .sort(
+          (a, b) =>
+            Number(used.has(a.nodeId)) - Number(used.has(b.nodeId)) ||
+            b.score - a.score ||
+            a.rank - b.rank,
+        );
+      const picked = ranked.slice(0, first ? 2 : 1);
+      // The first question always rests on what the search returned.
+      if (first && !picked.length && hits.length) picked.push({ ...hits[0], score: 0 });
+      picked.forEach((hit) => used.add(hit.nodeId));
+      const answerIndex = first
+        ? undefined
+        : scenario.dialogue.findIndex((message) => message.text === question.trigger);
+      return {
+        question,
+        unknown,
+        topics: topics.map((topic) => topic.label),
+        notes: picked.map((hit) => ({
+          id: hit.item.id,
+          title: hit.item.title,
+          summary: hit.item.summary,
+          rank: hit.rank,
+        })),
+        noteIds: picked.map((hit) => hit.nodeId),
+        ...(answerIndex !== undefined && answerIndex >= 0
+          ? {
+              answerIndex,
+              answer: {
+                label: question.origin.split("：")[0],
+                text: question.trigger,
+              },
+            }
+          : {}),
+      };
+    });
+
+  // Columns: what was known (notes, answers) → still unknown → question.
+  const columnX = 330;
+  const nodes: OntologyNode[] = [];
+  const edges: OntologyEdge[] = [];
+  const temporary = (
+    id: string,
+    kind: NodeKind,
+    typeLabel: string,
+    label: string,
+    sub: string | undefined,
+    x: number,
+    y: number,
+  ) =>
+    node({ id, kind, layer: "issue", typeLabel, label, sub, x, y, w: 230, h: 74, hypothetical: true });
+  let bottom = -Infinity;
+  const leftY = new Map<string, number>();
+  const placeLeft = (item: OntologyNode, h: number) => {
+    const y = (Number.isFinite(bottom) ? bottom + 18 : 0) + h / 2;
+    bottom = y + h / 2;
+    nodes.push({ ...item, x: -columnX, y, w: 230, h });
+    leftY.set(item.id, y);
+    return y;
+  };
+  let rowBottom = -Infinity;
+  for (const row of rows) {
+    const sourceYs: number[] = [];
+    for (const id of row.noteIds) {
+      if (leftY.has(id)) {
+        sourceYs.push(leftY.get(id)!);
+        continue;
+      }
+      const source = byId.get(id)!;
+      sourceYs.push(placeLeft(source, source.kind === "knowledge" ? 74 : 56));
+    }
+    if (row.answer && row.answerIndex !== undefined) {
+      const answerId = `answer-${row.question.id}`;
+      sourceYs.push(
+        placeLeft(
+          temporary(
+            answerId,
+            "answer",
+            `${row.answer.label} · ${expert?.name ?? "匠"}の回答（対話）`,
+            row.answer.text,
+            undefined,
+            0,
+            0,
+          ),
+          74,
+        ),
+      );
+    }
+    const target = sourceYs.length
+      ? sourceYs.reduce((a, b) => a + b, 0) / sourceYs.length
+      : 37;
+    const y = Number.isFinite(rowBottom) ? Math.max(target, rowBottom + 22 + 37) : target;
+    rowBottom = y + 37;
+    const gapId = `gap-${row.question.id}`;
+    const questionId = `question-${row.question.id}`;
+    nodes.push(
+      temporary(
+        gapId,
+        "gap",
+        "確認したい点（一時表示）",
+        row.unknown,
+        row.topics.length ? `観点：${row.topics.join("・")}` : undefined,
+        0,
+        y,
+      ),
+      temporary(
+        questionId,
+        "question",
+        `${row.question.id} · 生成した質問（一時表示）`,
+        row.question.text,
+        undefined,
+        columnX,
+        y,
+      ),
+    );
+    for (const id of row.noteIds) {
+      edges.push({ id: `plan:${id}>${gapId}`, source: id, target: gapId, kind: "plan", label: "参照した既存知見" });
+    }
+    if (row.answer) {
+      edges.push({
+        id: `plan:answer-${row.question.id}>${gapId}`,
+        source: `answer-${row.question.id}`,
+        target: gapId,
+        kind: "plan",
+        label: "直前の回答",
+      });
+    }
+    edges.push({ id: `plan:${gapId}>${questionId}`, source: gapId, target: questionId, kind: "plan", label: "質問を生成" });
+  }
+
+  const noteIds = [...used];
+  return {
+    key: `plan:${scenario.id}:${questions.map((item) => item.id).join(",")}`,
+    tone: "plan",
+    nodes,
+    edges,
+    emphasisNodeIds: noteIds,
+    emphasisEdgeIds: edges.map((item) => item.id),
+    badges: Object.fromEntries(
+      hits
+        .filter((hit) => used.has(hit.nodeId))
+        .map((hit) => [hit.nodeId, `参照 · 検索${hit.rank}位`]),
+    ),
+    caption: "質問の根拠",
+    stats: `質問${rows.length}件 · 参照した既存知見${noteIds.length}件（一時表示・保存しない）`,
+    rows: rows.map(({ noteIds: _ids, answerIndex: _index, ...row }) => row),
   };
 }

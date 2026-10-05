@@ -36,7 +36,7 @@ export function consultAndMerge(
     sourceIds: run.retrieval.results.map((result) => result.item.id),
     extraDialogue: [],
     reviewComment: "確認済み（テスト）",
-    basedOn: run.cycleOne,
+    basedOn: run.cited,
     now,
   });
   return { run, item, knowledge: [item, ...knowledge] };

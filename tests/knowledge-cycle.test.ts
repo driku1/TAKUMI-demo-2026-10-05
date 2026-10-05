@@ -10,6 +10,7 @@ import {
 } from "../src/data.ts";
 import {
   addKnowledgeOnce,
+  answerBasis,
   canMergeKnowledge,
   cycleOneKnowledge,
   latestUsageFor,
@@ -50,7 +51,7 @@ test("Mergeした知見と既存ナレッジで足りる質問は、専門家な
     const { run, usage } = answerFollowUp(followUp, knowledge);
     assert.equal(run.status, "used", followUp.id);
     assert.equal(run.mode, "knowledge-only", followUp.id);
-    assert.equal(run.cycleOne?.id, k1.id);
+    assert.equal(run.cited?.id, k1.id);
     assert.ok(run.retrieval.results.some((result) => result.item.id === k1.id));
     assert.ok(run.scenario.gap.includes(k1.title));
     assert.ok(run.summary?.includes(k1.title));
@@ -112,7 +113,7 @@ test("第1サイクルの知見が未登録なら、使ったことにしない"
   const { run, usage } = answerFollowUp(slide, initialKnowledge);
   assert.equal(run.status, "not-registered");
   assert.equal(run.mode, "interview");
-  assert.equal(run.cycleOne, undefined);
+  assert.equal(run.cited, undefined);
   assert.equal(usage, null);
   assert.ok(run.checks.every((check) => !check.usesKnowledge));
   assert.ok(
@@ -192,7 +193,84 @@ test("回答の活用情報は、知見が消えた・別テーマの場合に�
   assert.equal(latestUsageFor([usage], first.knowledge, aluminum), undefined);
 });
 
-test("第1サイクルの相談はこれまで通り再利用処理を持たない", () => {
+test("同じ相談をもう一度すると、Mergeした知見だけで回答する（推奨・適用条件を本文のまま引用）", () => {
+  for (const base of scenarios) {
+    const { item: k1, knowledge } = consultAndMerge(base, initialKnowledge);
+    const run = prepareRun({ query: base.question, scenario: base, knowledge });
+    assert.equal(run.mode, "knowledge-only", base.id);
+    assert.equal(run.match, "same");
+    assert.equal(run.status, "used");
+    assert.equal(run.cited?.id, k1.id);
+    assert.ok(run.retrieval.results.some((result) => result.item.id === k1.id));
+    assert.deepEqual(
+      run.checks.map((check) => check.label),
+      [...(k1.recommendations ?? []).map((item) => item.title), "適用条件の確認"],
+    );
+    const sources = run.checks.flatMap((check) => check.sources);
+    assert.ok(sources.every((source) => source.kind === "knowledge" && source.knowledgeId === k1.id));
+    const saved = [...(k1.recommendations ?? []).map((item) => item.body), k1.conditions];
+    assert.ok(sources.every((source) => saved.includes(source.quote)));
+    assert.ok(run.summary?.includes(k1.title) && run.summary.includes(k1.summary));
+    assert.equal(answerBasis(run), "同じ相談の登録知見");
+  }
+});
+
+test("関連する質問（量産時の注意点）も、その質問でMergeした知見があれば専門家なしで回答する", () => {
+  const { item: k2, knowledge } = consultAndMerge(slide, initialKnowledge);
+  assert.equal(k2.scenarioId, "molding-c2");
+  for (const query of [slide.question, "この形状を量産するときの注意点は?"]) {
+    const run = prepareRun({ query, scenario: matchScenario(query), knowledge });
+    assert.equal(run.mode, "knowledge-only", query);
+    assert.equal(run.match, "same");
+    assert.equal(run.cited?.id, k2.id);
+  }
+  // 量産の知見は、元の相談（リブ裏のヒケ）の回答には使わない
+  const base = prepareRun({ query: molding.question, scenario: molding, knowledge });
+  assert.equal(base.mode, "interview");
+  assert.equal(base.cited, undefined);
+});
+
+test("同じ相談を何度かMergeしていても、最新の知見が検索に入り、それを使う", () => {
+  const { item } = consultAndMerge(molding, initialKnowledge);
+  const copies: Knowledge[] = Array.from({ length: 7 }, (_, index) => ({
+    ...item,
+    // 新しいものほどIDの並びが後ろになるようにして、同点時の並びを確かめる
+    id: `${index}0000000-0000-4000-8000-000000000000`,
+    provenance: {
+      ...item.provenance!,
+      review: { ...item.provenance!.review, mergedAt: `2026-10-05T0${index}:00:00.000Z` },
+    },
+  }));
+  const knowledge = [...copies].reverse().concat(initialKnowledge);
+  const latest = copies[copies.length - 1];
+  const run = prepareRun({ query: molding.question, scenario: molding, knowledge });
+  assert.equal(run.retrieval.results[0].item.id, latest.id);
+  assert.equal(run.mode, "knowledge-only");
+  assert.equal(run.cited?.id, latest.id);
+  const related = prepareRun({ query: slide.question, scenario: slide, knowledge });
+  assert.equal(related.mode, "knowledge-only");
+  assert.equal(related.cited?.id, latest.id);
+});
+
+test("同じ相談の知見があっても、検索で見つからなければ使ったことにしない", () => {
+  const { item } = consultAndMerge(molding, initialKnowledge);
+  const hidden: Knowledge = { ...item, title: "無関係なタイトル", summary: "無関係な要約", tags: ["測定", "標準作業"] };
+  const run = prepareRun({ query: molding.question, scenario: molding, knowledge: [hidden, ...initialKnowledge] });
+  assert.equal(run.mode, "interview");
+  assert.equal(run.cited, undefined);
+  assert.deepEqual(run.checks, []);
+});
+
+test("旧バージョンで保存した同じ相談の知見（scenarioIdなし）も、タグが完全一致すれば使う", () => {
+  const { item } = consultAndMerge(molding, initialKnowledge);
+  const legacy = { ...item, id: "legacy-1" } as Knowledge;
+  delete legacy.scenarioId;
+  const run = prepareRun({ query: molding.question, scenario: molding, knowledge: [legacy, ...initialKnowledge] });
+  assert.equal(run.mode, "knowledge-only");
+  assert.equal(run.cited?.id, "legacy-1");
+});
+
+test("登録知見がなければ、最初の相談はこれまで通り専門家インタビューで回答する", () => {
   const run = prepareRun({
     query: molding.question,
     scenario: molding,

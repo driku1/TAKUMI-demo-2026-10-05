@@ -16,6 +16,7 @@ import {
   type OntologyNode,
   type OntologyStage,
 } from "../src/ontology.ts";
+import { buildUsageRecord, prepareRun } from "../src/knowledge-cycle.ts";
 import { answerFollowUp, consultAndMerge } from "./helpers.ts";
 
 const stages: OntologyStage[] = ["before", "after", "focus", "usage"];
@@ -126,6 +127,31 @@ test("回答の重ね表示（④）は点も線も追加せず、回答の参�
     assert.ok(!view.edges.some((edge) => edge.id === item.id));
   }
   assert.ok(view.overlayEdges.some((item) => item.label === "今回の質問に使用"));
+});
+
+test("同じ相談をもう一度した回答も④で示し、使った知見と相談の課題だけを強調する", () => {
+  const first = consultAndMerge(molding, initialKnowledge);
+  const run = prepareRun({ query: molding.question, scenario: molding, knowledge: first.knowledge });
+  const usage = buildUsageRecord(run, { runId: "again", question: molding.question })!;
+  assert.equal(usage.scenarioId, "molding");
+  const after = buildOntology({ knowledge: first.knowledge, scenario: molding, stage: "after" });
+  const view = buildOntology({ knowledge: first.knowledge, overlay: usage, scenario: molding, stage: "usage" });
+  assert.equal(view.stage, "usage");
+  assert.deepEqual(view.nodes.map((item) => item.id), after.nodes.map((item) => item.id));
+  assert.deepEqual(view.edges.map((item) => item.id), after.edges.map((item) => item.id));
+  assert.equal(view.focusNodeId, "knowledge-1");
+  assert.deepEqual(view.usedNodeIds.sort(), ["issue-molding-0", "knowledge-1"]);
+  assert.deepEqual(view.overlayEdges, []);
+  assert.ok(view.usedEdgeIds.includes("knowledge-1>issue-molding-0"));
+
+  // 関連する質問を先にMergeして、同じ質問をもう一度した場合は knowledge-2 を使う
+  const related = consultAndMerge(slide, initialKnowledge);
+  const again = prepareRun({ query: slide.question, scenario: slide, knowledge: related.knowledge });
+  const usage2 = buildUsageRecord(again, { runId: "again-2", question: slide.question })!;
+  const view2 = buildOntology({ knowledge: related.knowledge, overlay: usage2, scenario: molding, stage: "usage" });
+  assert.equal(view2.stage, "usage");
+  assert.equal(view2.focusNodeId, "knowledge-2");
+  assert.deepEqual(view2.usedNodeIds.sort(), ["issue-molding-1", "knowledge-2"]);
 });
 
 test("回答の知見が消えている・別テーマ・回答なしなら④を出さない", () => {
