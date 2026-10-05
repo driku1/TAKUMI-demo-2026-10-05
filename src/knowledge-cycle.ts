@@ -12,8 +12,6 @@ import {
 import { retrieveKnowledge } from "./process-model.ts";
 
 export const KNOWLEDGE_STORAGE_KEY = "takumi-knowledge";
-export const USAGE_STORAGE_KEY = "takumi-knowledge-usage";
-const USAGE_LIMIT = 50;
 
 export const shortId = (id: string) => id.slice(0, 8);
 
@@ -252,7 +250,10 @@ export type UsedKnowledge = {
   mergedAt?: string;
 };
 
-/** Record of a second-cycle answer that cited first-cycle knowledge. */
+/**
+ * How the current answer used registered knowledge. Kept in the session only:
+ * it is shown as an overlay and never added to the ontology.
+ */
 export type KnowledgeUsage = {
   runId: string;
   scenarioId: FollowUpScenarioId;
@@ -292,62 +293,9 @@ export function buildUsageRecord(
   };
 }
 
-const isText = (value: unknown): value is string =>
-  typeof value === "string" && value.length > 0;
-
-function isUsage(value: unknown): value is KnowledgeUsage {
-  const record = value as KnowledgeUsage;
-  return (
-    Boolean(record) &&
-    isText(record.runId) &&
-    followUpScenarios.some((item) => item.id === record.scenarioId) &&
-    scenarios.some((item) => item.id === record.baseScenarioId) &&
-    isText(record.question) &&
-    isText(record.answeredAt) &&
-    Array.isArray(record.usedKnowledge) &&
-    record.usedKnowledge.length > 0 &&
-    record.usedKnowledge.every((item) => isText(item?.id) && isText(item?.title)) &&
-    Array.isArray(record.checks) &&
-    record.checks.every(
-      (check) =>
-        isText(check?.id) &&
-        isText(check?.label) &&
-        Array.isArray(check?.sources) &&
-        check.sources.every(
-          (source) =>
-            (source?.kind === "knowledge" && isText(source.knowledgeId)) ||
-            source?.kind === "dialogue",
-        ),
-    )
-  );
-}
-
-/** Parses stored usage records, skipping anything malformed. */
-export function parseUsageRecords(raw: unknown): KnowledgeUsage[] {
-  return Array.isArray(raw) ? raw.filter(isUsage) : [];
-}
-
-export function readStoredUsage(storage: Pick<Storage, "getItem">) {
-  try {
-    return parseUsageRecords(
-      JSON.parse(storage.getItem(USAGE_STORAGE_KEY) || "null"),
-    );
-  } catch {
-    return [];
-  }
-}
-
-export function appendUsageRecord(
-  records: KnowledgeUsage[],
-  record: KnowledgeUsage,
-): KnowledgeUsage[] {
-  if (records.some((item) => item.runId === record.runId)) return records;
-  return [record, ...records].slice(0, USAGE_LIMIT);
-}
-
 /**
- * Latest usage of a base scenario's first-cycle knowledge. Records whose cited
- * knowledge is missing, or is not first-cycle knowledge of that scenario, are
+ * Latest usage of a base scenario's registered knowledge. Usage whose cited
+ * knowledge is missing, or is not registered knowledge of that scenario, is
  * ignored so the graph never shows a use that cannot be traced.
  */
 export function latestUsageFor(
@@ -368,15 +316,6 @@ export function latestUsageFor(
               : cycleOneKnowledge([item], base)),
         );
       }),
-  );
-}
-
-export function usageForKnowledge(
-  records: KnowledgeUsage[],
-  knowledgeId: string,
-) {
-  return records.filter((record) =>
-    record.usedKnowledge.some((item) => item.id === knowledgeId),
   );
 }
 

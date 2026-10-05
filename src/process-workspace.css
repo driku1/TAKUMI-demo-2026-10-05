@@ -1434,3 +1434,12 @@
     align-items: stretch;
   }
 }
+.answer-graph {
+  margin-top: 16px;
+}
+.answer-graph .trace-section-heading small {
+  margin-left: 8px;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--trace-muted);
+}

@@ -22,14 +22,11 @@ import {
   Layers,
   Menu,
   CheckCircle2,
-  RefreshCcw,
 } from "lucide-react";
 import {
   experts,
   scenarios,
-  followUpScenarios,
   baseScenarioOf,
-  followUpOf,
   matchScenario,
   initialKnowledge,
   mergeKnowledge,
@@ -42,15 +39,10 @@ import ProcessWorkspace from "./ProcessWorkspace";
 import OntologyGraph from "./OntologyGraph";
 import {
   KNOWLEDGE_STORAGE_KEY,
-  USAGE_STORAGE_KEY,
   addKnowledgeOnce,
-  appendUsageRecord,
   buildUsageRecord,
-  cycleOneKnowledge,
   prepareRun,
-  readStoredUsage,
   shortId,
-  usageForKnowledge,
   type KnowledgeUsage,
 } from "./knowledge-cycle";
 
@@ -78,7 +70,7 @@ const steps = [
   ["質問生成", "質問の狙いと生成根拠"],
   ["インタビュー", "Agentと匠の対話"],
   ["回答・登録PR", "レビュー後にマージ"],
-  ["第2サイクル", "登録知見の活用を確認"],
+  ["登録知見の活用", "次の相談で使われたかを確認"],
 ];
 function readKnowledge(): Knowledge[] {
   try {
@@ -126,9 +118,6 @@ export default function App() {
   const [knowledge, setKnowledge] = useState<Knowledge[]>(readKnowledge);
   const [runKnowledge, setRunKnowledge] = useState<Knowledge[]>(knowledge);
   const [runId, setRunId] = useState<string | null>(null);
-  const [usageRecords, setUsageRecords] = useState<KnowledgeUsage[]>(() =>
-    readStoredUsage(localStorage),
-  );
   const [savedId, setSavedId] = useState<string | null>(null);
   const [modal, setModal] = useState<"help" | "export" | null>(null);
   const [exportContent, setExportContent] = useState("");
@@ -161,20 +150,15 @@ export default function App() {
     [query, scenario, runKnowledge],
   );
   const activeExpert = experts.find((x) => x.id === scenario.expertId)!;
-  // A second-cycle answer that cited first-cycle knowledge is recorded once it is compiled.
-  useEffect(() => {
-    if (tick < 9 || !runId) return;
-    if (usageRecords.some((record) => record.runId === runId)) return;
-    const record = buildUsageRecord(run, { runId, question: query });
-    if (!record) return;
-    const next = appendUsageRecord(usageRecords, record);
-    setUsageRecords(next);
-    try {
-      localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // Session-only when storage is unavailable.
-    }
-  }, [tick, runId, run, query, usageRecords]);
+  // How the answer on screen used registered knowledge. Session only: it is
+  // drawn over the graph (④) and cleared with the consultation, never saved.
+  const answerUsage = useMemo<KnowledgeUsage | null>(
+    () =>
+      tick >= 9 && runId
+        ? buildUsageRecord(run, { runId, question: query })
+        : null,
+    [tick, runId, run, query],
+  );
   const dialogOpen = Boolean(modal || expertDetail || article);
   useEffect(() => {
     if (!running) return;
@@ -283,15 +267,6 @@ export default function App() {
     setScenario(next);
     setSelectedExample(next.id);
   };
-  const prepareFollowUp = (base: Scenario) => {
-    const next = followUpOf(base)!;
-    prepareConsultation(next);
-    setToast(
-      cycleOneKnowledge(knowledge, baseScenarioOf(next))
-        ? "第2サイクルの関連相談を用意しました。「Run agent」で登録知見の活用を確認できます。"
-        : "関連相談を用意しました。第1サイクルの知見は未登録のため、登録知見は使われません。",
-    );
-  };
   const save = (item: Knowledge) => {
     if (savedId) return;
     const next = addKnowledgeOnce(knowledge, item);
@@ -308,7 +283,7 @@ export default function App() {
   };
   const download = () => {
     const reuse = run.scenario.followUp
-      ? `\n\n## 第1サイクル知見の活用\n${
+      ? `\n\n## 登録知見の活用\n${
           run.cycleOne
             ? `使用した登録知見：${run.cycleOne.title}（ID ${run.cycleOne.id}）\n\n${run.checks
                 .map(
@@ -591,9 +566,8 @@ export default function App() {
                     <OntologyGraph
                       variant="inline"
                       knowledge={knowledge}
-                      usageRecords={usageRecords}
                       scenario={baseScenarioOf(scenario)}
-                      initialStage={scenario.followUp ? "usage" : "focus"}
+                      initialStage="focus"
                       focusKnowledgeId={id}
                       onOpenGraph={() => {
                         setBrowseScenario(baseScenarioOf(scenario));
@@ -601,12 +575,22 @@ export default function App() {
                       }}
                     />
                   )}
-                  onStartFollowUp={
-                    scenario.followUp
-                      ? undefined
-                      : () => prepareFollowUp(baseScenarioOf(scenario))
+                  renderAnswerGraph={() =>
+                    answerUsage ? (
+                      <OntologyGraph
+                        variant="inline"
+                        knowledge={knowledge}
+                        overlay={answerUsage}
+                        scenario={baseScenarioOf(scenario)}
+                        initialStage="usage"
+                        focusKnowledgeId={answerUsage.usedKnowledge[0].id}
+                        onOpenGraph={() => {
+                          setBrowseScenario(baseScenarioOf(scenario));
+                          navigate("graph");
+                        }}
+                      />
+                    ) : null
                   }
-                  followUpLabel={followUpOf(scenario)?.label}
                 />
               ) : (
                 <>
@@ -728,43 +712,6 @@ export default function App() {
                               </button>
                             ))}
                           </div>
-                          <div className="sample-label cycle-two-label">
-                            <RefreshCcw size={14} />
-                            第2サイクル：登録した知見を使う関連相談
-                          </div>
-                          <div className="sample-chips cycle-two-chips">
-                            {followUpScenarios.map((s) => {
-                              const registered = cycleOneKnowledge(
-                                knowledge,
-                                baseScenarioOf(s),
-                              );
-                              return (
-                                <button
-                                  className={
-                                    selectedExample === s.id ? "selected" : ""
-                                  }
-                                  key={s.id}
-                                  onClick={() => {
-                                    setQuery(s.question);
-                                    setScenario(s);
-                                    setSelectedExample(s.id);
-                                  }}
-                                  title={
-                                    registered
-                                      ? `第1サイクル知見「${registered.title}」を使います`
-                                      : "第1サイクルの知見が未登録のため、登録知見は使われません"
-                                  }
-                                >
-                                  {s.label}
-                                  <span
-                                    className={`cycle-state ${registered ? "ready" : ""}`}
-                                  >
-                                    {registered ? "知見登録済み" : "未登録"}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
                           <div className="consult-action">
                             <span>
                               <ShieldCheck size={14} />
@@ -806,7 +753,7 @@ export default function App() {
                       <OntologyGraph
                         variant="card"
                         knowledge={knowledge}
-                        usageRecords={usageRecords}
+                        overlay={answerUsage}
                         scenario={baseScenarioOf(scenario)}
                       />
                       <div className="graph-footer">
@@ -914,7 +861,7 @@ export default function App() {
                 <OntologyGraph
                   variant="page"
                   knowledge={knowledge}
-                  usageRecords={usageRecords}
+                  overlay={answerUsage}
                   scenario={browseScenario}
                   onArticle={setArticle}
                 />
@@ -937,15 +884,7 @@ export default function App() {
                       disabled={running}
                       onClick={() => prepareConsultation(browseScenario)}
                     >
-                      第1サイクル：このテーマで相談する
-                      <ArrowRight size={14} />
-                    </button>
-                    <button
-                      className="text-button"
-                      disabled={running}
-                      onClick={() => prepareFollowUp(browseScenario)}
-                    >
-                      第2サイクル：{followUpOf(browseScenario)?.label}
+                      このテーマで相談する
                       <ArrowRight size={14} />
                     </button>
                   </div>
@@ -1268,33 +1207,12 @@ export default function App() {
                     </p>
                     {article.provenance.basedOn?.map((source) => (
                       <p key={source.id} className="article-cycle">
-                        発展元（第1サイクル知見）：
+                        発展元（参照した登録知見）：
                         {knowledge.find((item) => item.id === source.id)
                           ?.title ?? `${source.title}（現在は見つかりません）`}
                         （{shortId(source.id)}）
                       </p>
                     ))}
-                    {usageForKnowledge(usageRecords, article.id).length > 0 && (
-                      <div className="article-cycle">
-                        <strong>第2サイクルでの活用</strong>
-                        {usageForKnowledge(usageRecords, article.id).map(
-                          (record) => (
-                            <p key={record.runId}>
-                              {new Date(record.answeredAt).toLocaleString(
-                                "ja-JP",
-                              )}
-                              ：「{record.question}」の回答で
-                              {
-                                record.checks.filter(
-                                  (check) => check.usesKnowledge,
-                                ).length
-                              }
-                              件の確認事項に使用
-                            </p>
-                          ),
-                        )}
-                      </div>
-                    )}
                     <details>
                       <summary>
                         参照したナレッジ（{article.provenance.sourceIds.length}
@@ -1358,7 +1276,7 @@ export default function App() {
                               "初回質問と、匠の回答から生成した追加質問を確認します。",
                               "約16秒で模擬対話を再生。一時停止と追加質問に対応。",
                               "設計提案と登録PRの差分を確認し、模擬レビュー後にマージします。マージ後は追加された知見と接続先を補助グラフで確認できます。",
-                              "「第2サイクル」の関連相談を実行すると、登録した知見がIDと本文の引用つきで検索・回答に使われます。Knowledge Graphの①〜④で、登録前・追加後・注目・活用を比較できます。",
+                              "登録した知見に関係する質問をすると、検索でヒットした登録知見がIDと本文の引用つきで回答に使われます（ヒットしなければ使ったことにしません）。Knowledge Graphの①〜④で、登録前・追加後・注目・回答での活用を比較できます。",
                             ][i]
                           }
                         </p>
@@ -1369,7 +1287,7 @@ export default function App() {
                 <div className="demo-explanation">
                   <strong>デモの範囲</strong>
                   <p>
-                    AI処理・マッチング・対話は、3つの相談シナリオと、それぞれの登録知見を使う第2サイクルの関連相談によるシミュレーションです。専門家の回答はデモ用に準備した内容です。自由入力はキーワードで参照シナリオに振り分けます。実際のAI
+                    AI処理・マッチング・対話は、登録済みのシナリオによるシミュレーションです。専門家の回答はデモ用に準備した内容です。ナレッジグラフには人が承認してMergeした知見だけが追加されます。自由入力はキーワードで参照シナリオに振り分けます。実際のAI
                     API・社内データベース・メッセージ送信サービスには接続していません。添付ファイルの内容は解析しません。
                   </p>
                 </div>

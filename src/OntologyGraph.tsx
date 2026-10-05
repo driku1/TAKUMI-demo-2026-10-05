@@ -9,9 +9,10 @@ import {
   countSummary,
   defaultStage,
   edgeGeometry,
-  edgeKindLabels,
   egoLayout,
   fitText,
+  labelPriority,
+  wrapText,
   neighbours,
   placeEdgeLabels,
   stageFrameNodes,
@@ -34,7 +35,7 @@ const layerLabels: Record<OntologyLayer, string> = {
   process: "工程領域 / 対象部品",
   issue: "課題 / 技術・観点",
   document: "ドキュメント（既存ナレッジ）",
-  cycle: "相談・回答 / 登録知見",
+  registered: "登録知見（Merge済み）",
 };
 const stages: OntologyStage[] = ["before", "after", "focus", "usage"];
 const heights: Record<Variant, number> = { page: 640, card: 300, inline: 430 };
@@ -46,12 +47,57 @@ const edgeColors: Record<EdgeKind, string> = {
   approval: "#1f9d6b",
   usage: "#d97706",
 };
+const relationLegend: {
+  kind: EdgeKind;
+  name: string;
+  note: string;
+  dash?: string;
+}[] = [
+  { kind: "structure", name: "構造・包含", note: "配下 / 対象部品 / 確認観点 / 対象課題" },
+  { kind: "organization", name: "所属・担当", note: "所属 / 担当 / 執筆" },
+  { kind: "reference", name: "参照・出典", note: "参照（出典ドキュメント） / 発展元" },
+  { kind: "approval", name: "承認", note: "承認（Approve review・模擬）" },
+  {
+    kind: "tag",
+    name: "タグ一致・本文で言及",
+    note: "語が一致しているだけの関係（因果関係ではない）",
+    dash: "4 4",
+  },
+];
+
+function LineSample({
+  color,
+  dash,
+  width = 3,
+  round = false,
+}: {
+  color: string;
+  dash?: string;
+  width?: number;
+  round?: boolean;
+}) {
+  return (
+    <svg className="onto-line-sample" width="34" height="12" aria-hidden="true">
+      <line
+        x1="2"
+        y1="6"
+        x2="32"
+        y2="6"
+        stroke={color}
+        strokeWidth={width}
+        strokeDasharray={dash}
+        strokeLinecap={round ? "round" : "butt"}
+      />
+    </svg>
+  );
+}
+
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
 
 export default function OntologyGraph({
   knowledge,
-  usageRecords,
+  overlay,
   scenario,
   variant = "page",
   initialStage,
@@ -60,7 +106,8 @@ export default function OntologyGraph({
   onOpenGraph,
 }: {
   knowledge: Knowledge[];
-  usageRecords: KnowledgeUsage[];
+  /** Current answer's use of registered knowledge (session only, never saved). */
+  overlay?: KnowledgeUsage | null;
   scenario: Scenario;
   variant?: Variant;
   initialStage?: OntologyStage;
@@ -73,16 +120,25 @@ export default function OntologyGraph({
   const interactive = variant !== "card";
   const availability = useMemo(
     () =>
-      buildOntology({ knowledge, usageRecords, scenario, stage: "usage" })
+      buildOntology({ knowledge, overlay, scenario, stage: "usage" })
         .availability,
-    [knowledge, usageRecords, scenario],
+    [knowledge, overlay, scenario],
   );
   const [stage, setStage] = useState<OntologyStage>(
     () => initialStage ?? defaultStage(availability),
   );
   const view = useMemo(
-    () => buildOntology({ knowledge, usageRecords, scenario, stage }),
-    [knowledge, usageRecords, scenario, stage],
+    () => buildOntology({ knowledge, overlay, scenario, stage }),
+    [knowledge, overlay, scenario, stage],
+  );
+  // ④ draws the answer's temporary lines on top of the approved graph.
+  const full = useMemo(
+    () => ({
+      nodes: view.nodes,
+      edges:
+        view.stage === "usage" ? [...view.edges, ...view.overlayEdges] : view.edges,
+    }),
+    [view],
   );
   const focusNodeId =
     (focusKnowledgeId &&
@@ -97,7 +153,7 @@ export default function OntologyGraph({
     process: true,
     issue: true,
     document: true,
-    cycle: true,
+    registered: true,
   });
   const [largeText, setLargeText] = useState(false);
   const [allLabels, setAllLabels] = useState(false);
@@ -148,7 +204,7 @@ export default function OntologyGraph({
   };
   const frameNodes = () =>
     variant === "inline" && focusNodeId
-      ? egoLayout(view, focusNodeId, view.stage === "usage" ? view.usedNodeIds : []).nodes
+      ? egoLayout(full, focusNodeId, view.usedNodeIds).nodes
       : stageFrameNodes(view, scenario);
   useEffect(() => {
     fitTo(frameNodes(), variant === "page" && Boolean(focusNodeId) && autoSelect);
@@ -197,8 +253,8 @@ export default function OntologyGraph({
   // The inline view re-arranges the same nodes and relations around the note.
   const drawn =
     variant === "inline" && focusNodeId
-      ? egoLayout(view, focusNodeId, view.stage === "usage" ? view.usedNodeIds : [])
-      : view;
+      ? egoLayout(full, focusNodeId, view.usedNodeIds)
+      : full;
   const visibleNodes = drawn.nodes.filter((item) => layers[item.layer]);
   const visibleIds = new Set(visibleNodes.map((item) => item.id));
   const visibleEdges = drawn.edges.filter(
@@ -214,7 +270,7 @@ export default function OntologyGraph({
   // Reference behaviour: the selected node and its relations stay lit, the
   // rest is dimmed. Stage emphasis (NEW / USED) stays lit as well.
   const selectedNeighbours = selectedNode
-    ? neighbours(view, selectedNode.id)
+    ? neighbours(full, selectedNode.id)
     : new Set<string>();
   const activeEdges = new Set(
     visibleEdges
@@ -245,8 +301,14 @@ export default function OntologyGraph({
   const inCase = (item: OntologyNode) =>
     item.cluster === caseCluster || item.layer === "org";
   const edgeFont = EDGE_FONT * (largeText ? 1.2 : 1);
-  const priority = (item: OntologyEdge) =>
-    usedEdges.has(item.id) ? 0 : newEdges.has(item.id) ? 1 : activeEdges.has(item.id) ? 2 : 3;
+  const stagePriority = labelPriority(
+    {
+      usedEdgeIds: view.usedEdgeIds,
+      newEdgeIds: view.stage === "before" ? [] : view.newEdgeIds,
+    },
+    activeEdges,
+  );
+  const priority = (item: OntologyEdge) => stagePriority(item);
   const labelCandidates = visibleEdges
     .filter((item) => {
       if (variant === "card") return activeEdges.has(item.id);
@@ -287,7 +349,7 @@ export default function OntologyGraph({
       : undefined;
 
   const relations = selectedNode
-    ? view.edges
+    ? full.edges
         .filter(
           (item) =>
             item.source === selectedNode.id || item.target === selectedNode.id,
@@ -317,7 +379,7 @@ export default function OntologyGraph({
 
   const focusConnections =
     variant === "inline" && focusNodeId
-      ? view.edges
+      ? full.edges
           .filter(
             (item) => item.source === focusNodeId || item.target === focusNodeId,
           )
@@ -367,10 +429,11 @@ export default function OntologyGraph({
           </div>
         </div>
       )}
+      <div className={variant === "page" ? "onto-main" : "onto-main-plain"}>
       {variant === "page" && (
-        <div className="onto-toolbar">
-          <div className="onto-layers" role="group" aria-label="表示レイヤー">
-            <span>表示レイヤー</span>
+        <aside className="onto-side" aria-label="表示レイヤーと凡例">
+          <section role="group" aria-label="表示レイヤー">
+            <h4>表示レイヤー</h4>
             {(Object.keys(layerLabels) as OntologyLayer[]).map((layer) => (
               <label key={layer} className="onto-check">
                 <input
@@ -386,16 +449,61 @@ export default function OntologyGraph({
                 {layerLabels[layer]}
               </label>
             ))}
-          </div>
-          <label className="onto-check">
-            <input
-              type="checkbox"
-              checked={allLabels}
-              onChange={(event) => setAllLabels(event.target.checked)}
-            />
-            すべての関係名を表示
-          </label>
-        </div>
+          </section>
+          <section aria-label="線の種類">
+            <h4>関係（線の種類）</h4>
+            {relationLegend.map((item) => (
+              <div key={item.name} className="onto-legend-row">
+                <LineSample color={edgeColors[item.kind]} dash={item.dash} />
+                <div>
+                  <b>{item.name}</b>
+                  <small>{item.note}</small>
+                </div>
+              </div>
+            ))}
+          </section>
+          <section aria-label="強調表示">
+            <h4>強調</h4>
+            <div className="onto-legend-row">
+              <LineSample color="#a100ff" width={4} />
+              <div>
+                <b>
+                  <span className="legend-badge new">NEW</span> 追加された点・線
+                </b>
+                <small>今回Mergeした知見と、自動でつながった関係（②③）</small>
+              </div>
+            </div>
+            <div className="onto-legend-row">
+              <LineSample color="#d97706" width={4} />
+              <div>
+                <b>
+                  <span className="legend-badge used">USED</span> 回答で使った知見
+                </b>
+                <small>表示中の回答が使った登録知見と、その関係（④）</small>
+              </div>
+            </div>
+            <div className="onto-legend-row">
+              <LineSample color="#d97706" width={4} dash="1 6" round />
+              <div>
+                <b>回答で使用（一時表示）</b>
+                <small>回答が知見を当てた課題・観点。保存されません（④）</small>
+              </div>
+            </div>
+          </section>
+          <section>
+            <label className="onto-check">
+              <input
+                type="checkbox"
+                checked={allLabels}
+                onChange={(event) => setAllLabels(event.target.checked)}
+              />
+              すべての関係名を表示
+            </label>
+            <p className="onto-side-note">
+              実線＝登録された関係、点線＝語の一致（因果関係ではありません）。ホイールで拡大縮小、背景ドラッグで移動、ノード選択で関係を強調します。
+            </p>
+          </section>
+        </aside>
       )}
       <div className={`onto-body ${variant === "inline" ? "with-list" : ""}`}>
         <div
@@ -415,7 +523,9 @@ export default function OntologyGraph({
                 </em>
               )}
               {counts.usedLinks > 0 && (
-                <em className="used">USED {counts.usedLinks} links</em>
+                <em className="used">
+                  USED 知見{view.usedNodeIds.filter((id) => id.startsWith("knowledge")).length} · 関係{counts.usedLinks}（保存しない）
+                </em>
               )}
             </div>
           )}
@@ -520,7 +630,7 @@ export default function OntologyGraph({
                 const geometry = edgeGeometry(a, b);
                 const lit = activeEdges.has(item.id);
                 const className = [
-                  "onto-edge",
+                  item.id.startsWith("overlay:") ? "onto-overlay" : "onto-edge",
                   `kind-${item.kind}`,
                   item.peripheral ? "peripheral" : "",
                   lit ? "active" : dimming ? "dim" : "",
@@ -542,6 +652,7 @@ export default function OntologyGraph({
               {visibleNodes.map((item) => {
                 const isNew = view.stage !== "before" && newNodes.has(item.id);
                 const isUsed = usedNodes.has(item.id) && item.kind === "knowledge";
+                const isTarget = usedNodes.has(item.id) && item.kind !== "knowledge";
                 const dim = dimming && !litNodes.has(item.id);
                 const titleFont = NODE_FONT.title * scale;
                 const subFont = NODE_FONT.sub * scale;
@@ -558,6 +669,7 @@ export default function OntologyGraph({
                       dim ? "dim" : "",
                       isNew ? "is-new" : "",
                       isUsed ? "is-used" : "",
+                      isTarget ? "is-used-target" : "",
                     ].join(" ")}
                     transform={`translate(${item.x} ${item.y})`}
                     role={interactive ? "button" : undefined}
@@ -583,7 +695,7 @@ export default function OntologyGraph({
                       rx={
                         item.kind === "topic"
                           ? item.h / 2
-                          : ["document", "knowledge", "consultation", "answer", "condition"].includes(item.kind)
+                          : ["document", "knowledge"].includes(item.kind)
                             ? 11
                             : 5
                       }
@@ -596,17 +708,34 @@ export default function OntologyGraph({
                     >
                       {fitText(item.typeLabel, item.w - 18, typeFont)}
                     </text>
-                    <text
-                      className="node-title"
-                      y={titleY}
-                      style={{ fontSize: titleFont }}
-                    >
-                      {fitText(item.label, item.w - 14, titleFont)}
-                    </text>
+                    {item.kind === "knowledge" ? (
+                      wrapText(item.label, item.w - 16, titleFont).map((line, index, all) => (
+                        <text
+                          key={index}
+                          className="node-title"
+                          y={(all.length === 1 ? 6 : -2) + index * (titleFont + 3)}
+                          style={{ fontSize: titleFont }}
+                        >
+                          {line}
+                        </text>
+                      ))
+                    ) : (
+                      <text
+                        className="node-title"
+                        y={titleY}
+                        style={{ fontSize: titleFont }}
+                      >
+                        {fitText(item.label, item.w - 14, titleFont)}
+                      </text>
+                    )}
                     {item.sub && (
                       <text
                         className="node-sub"
-                        y={titleY + subFont + 3}
+                        y={
+                          item.kind === "knowledge"
+                            ? item.h / 2 - 9
+                            : titleY + subFont + 3
+                        }
                         style={{ fontSize: subFont }}
                       >
                         {fitText(item.sub, item.w - 14, subFont)}
@@ -615,7 +744,7 @@ export default function OntologyGraph({
                     {(isNew || isUsed) && (
                       <g
                         className={`node-badge ${isUsed ? "used" : "new"}`}
-                        transform={`translate(${item.w / 2 - 6} ${-item.h / 2})`}
+                        transform={`translate(${item.w / 2 - 6} ${-item.h / 2 - 9})`}
                       >
                         <rect x={isUsed ? -60 : -34} y={-9} width={isUsed ? 66 : 40} height={18} rx={9} />
                         <text x={isUsed ? -27 : -14} y={4}>
@@ -627,7 +756,7 @@ export default function OntologyGraph({
                 );
               })}
               {labels.map((label) => {
-                const item = view.edges.find((entry) => entry.id === label.edgeId)!;
+                const item = full.edges.find((entry) => entry.id === label.edgeId)!;
                 return (
                   <g
                     key={label.edgeId}
@@ -725,7 +854,7 @@ export default function OntologyGraph({
               {selectedNode.facts.length > 0 && (
                 <div className="onto-detail-box">
                   <small>
-                    {selectedNode.kind === "answer" ? "確認事項と根拠" : "登録内容"}
+                    登録内容
                   </small>
                   <dl>
                     {selectedNode.facts.map((fact, index) => (
@@ -801,35 +930,36 @@ export default function OntologyGraph({
           </aside>
         )}
       </div>
+      </div>
       {variant === "page" && (
         <>
-          {view.notice && <p className="onto-notice">{view.notice}</p>}
-          <div className="onto-legend">
-            <div>
-              <strong>関係</strong>
-              {(Object.keys(edgeColors) as EdgeKind[]).map((kind) => (
-                <span key={kind}>
-                  <i
-                    className={kind === "tag" ? "dashed" : ""}
-                    style={{ background: edgeColors[kind] }}
-                  />
-                  {edgeKindLabels[kind]}
-                </span>
-              ))}
+          {view.usage && (
+            <div className="onto-usage" aria-live="polite">
+              <strong>今回の回答で使った登録知見（重ね表示・保存しません）</strong>
+              <p>質問：{view.usage.question}</p>
+              <p>
+                使用した知見：
+                {view.usage.usedKnowledge
+                  .map((item) => `${item.title}（ID ${item.id}）`)
+                  .join(" / ")}
+              </p>
+              <ul>
+                {view.usage.checks
+                  .filter((check) => check.usesKnowledge)
+                  .map((check) => (
+                    <li key={check.id}>
+                      <b>{check.label}</b>
+                      {check.sources
+                        .filter((source) => source.kind === "knowledge")
+                        .map((source) =>
+                          source.kind === "knowledge" ? source.location : "",
+                        )
+                        .join(" / ")}
+                    </li>
+                  ))}
+              </ul>
             </div>
-            <div>
-              <strong>強調</strong>
-              <span>
-                <b className="legend-badge new">NEW</b>今回の登録で増えた点・線
-              </span>
-              <span>
-                <b className="legend-badge used">USED</b>第2サイクルの回答で使われた知見と関係
-              </span>
-              <span className="legend-note">
-                線は因果関係を表しません。ノードを選ぶと関係名・接続先・詳細を表示します。ホイールで拡大縮小、ドラッグで移動できます。
-              </span>
-            </div>
-          </div>
+          )}
         </>
       )}
       {variant === "card" && (

@@ -10,14 +10,10 @@ import {
 } from "../src/data.ts";
 import {
   addKnowledgeOnce,
-  appendUsageRecord,
   canMergeKnowledge,
   cycleOneKnowledge,
   latestUsageFor,
-  parseUsageRecords,
   prepareRun,
-  readStoredUsage,
-  USAGE_STORAGE_KEY,
 } from "../src/knowledge-cycle.ts";
 import { answerFollowUp, consultAndMerge } from "./helpers.ts";
 
@@ -150,22 +146,13 @@ test("Mergeは確認チェック・Approve review・必須項目がそろった�
   assert.equal(canMergeKnowledge({ ...ready, ready: false }), false);
 });
 
-test("活用記録は壊れたデータを読み飛ばし、存在しない知見を使ったことにしない", () => {
+test("回答の活用情報は、知見が消えた・別テーマの場合に使ったことにしない", () => {
   const first = consultAndMerge(molding, initialKnowledge);
   const { usage } = answerFollowUp(slide, first.knowledge);
   assert.ok(usage);
-  const parsed = parseUsageRecords([usage, { runId: 1 }, null, "x"]);
-  assert.deepEqual(parsed, [usage]);
-  assert.deepEqual(parseUsageRecords({ not: "array" }), []);
-  assert.deepEqual(
-    readStoredUsage({ getItem: (key) => (key === USAGE_STORAGE_KEY ? "{broken" : null) }),
-    [],
-  );
   assert.equal(latestUsageFor([usage], first.knowledge, molding)?.runId, usage.runId);
   assert.equal(latestUsageFor([usage], initialKnowledge, molding), undefined);
   assert.equal(latestUsageFor([usage], first.knowledge, aluminum), undefined);
-  const twice = appendUsageRecord(appendUsageRecord([], usage), usage);
-  assert.equal(twice.length, 1);
 });
 
 test("第1サイクルの相談はこれまで通り再利用処理を持たない", () => {

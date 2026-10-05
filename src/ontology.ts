@@ -22,13 +22,14 @@ import {
  * (ontology-v0.04.html): an organization zone and a product/knowledge zone,
  * card nodes on fixed coordinates, typed relations and layer filters.
  * Vehicle / ECU / artifact / incident nodes are replaced by process domain,
- * part, issue, topic, document and consultation nodes; organization nodes
- * (company, division, department, team, person) and documents are kept.
+ * part, issue, topic and document nodes; organization nodes (company,
+ * division, department, team, person) and documents are kept. Only approved
+ * (Merged) knowledge is added; consultations and answers are not stored.
  */
 
 export const WORLD = { width: 1620, height: 1040 };
 
-export type OntologyLayer = "org" | "process" | "issue" | "document" | "cycle";
+export type OntologyLayer = "org" | "process" | "issue" | "document" | "registered";
 export type NodeKind =
   | "company"
   | "division"
@@ -41,10 +42,7 @@ export type NodeKind =
   | "issue"
   | "topic"
   | "document"
-  | "knowledge"
-  | "condition"
-  | "consultation"
-  | "answer";
+  | "knowledge";
 export type Phase = "cycle1" | "cycle2";
 
 export type OntologyNode = {
@@ -91,12 +89,12 @@ export type OntologyEdge = {
 export type OntologyStage = "before" | "after" | "focus" | "usage";
 
 export const edgeKindLabels: Record<EdgeKind, string> = {
-  structure: "構造・包含（配下・対象・確認観点）",
+  structure: "構造・包含（配下・対象部品・確認観点・対象課題）",
   organization: "所属・担当・執筆",
-  reference: "参照・出典（抽出元・発展元）",
+  reference: "参照・出典（参照・発展元）",
   tag: "タグ一致・本文で言及（因果ではない）",
-  approval: "承認・適用条件",
-  usage: "今回の活用（検索でヒット・回答に使用）",
+  approval: "承認（Approve review）",
+  usage: "今回の回答で使用（④の重ね表示・保存しない）",
 };
 
 export const stageLabels: Record<
@@ -107,13 +105,13 @@ export const stageLabels: Record<
     button: "① 登録前",
     title: "登録前｜既存の知識の関係",
     description:
-      "初期ナレッジ・組織・工程の関係だけを表示します。保存済みの知見は削除せず、表示から外しています。",
+      "初期ナレッジ・組織・工程の関係だけを表示します。登録済みの知見は削除せず、表示から外しています。",
   },
   after: {
     button: "② 追加後",
-    title: "追加後｜第1サイクルで登録した知見",
+    title: "追加後｜Approve・Mergeした知見",
     description:
-      "Approve・Mergeした知見と、自動で増えた関係（NEW）を重ねます。",
+      "人が承認してMergeした知見と、自動で増えた関係（NEW）を重ねます。承認されていない相談・回答はグラフに入りません。",
   },
   focus: {
     button: "③ 新知見に注目",
@@ -122,10 +120,10 @@ export const stageLabels: Record<
       "全体の位置づけを残したまま、登録知見の接続先と登録内容を表示します。",
   },
   usage: {
-    button: "④ 第2サイクルで活用",
-    title: "第2サイクルで活用｜相談・回答・判断への使用",
+    button: "④ 回答での活用",
+    title: "回答での活用｜今回の回答が使った登録知見",
     description:
-      "関連相談で検索・参照され、回答と設計確認事項に使われた関係（USED）を強調します。",
+      "表示中の相談の回答が、グラフ内のどの登録知見を使い、どの課題・観点に当てたかを重ねて表示します（USED）。この重ね表示は保存されず、グラフ自体は変わりません。",
   },
 };
 
@@ -251,7 +249,7 @@ const centerX = (cluster: ClusterDef) => cluster.x + cluster.width / 2;
 
 /**
  * Theme clusters left to right. The theme being viewed is placed next to the
- * organization and consultation zones so its story reads in one frame.
+ * organization zone so its story reads in one frame.
  */
 export function clusterLayout(caseId: BaseScenarioId): ClusterDef[] {
   const ordered = [
@@ -292,21 +290,12 @@ export const zones = [
     x: 20,
     y: 30,
     width: 540,
-    height: 560,
-  },
-  {
-    id: "cycle",
-    title: "相談・回答 オントロジー",
-    sub: "Consultation / Answer / Usage（相談のたびに追加）",
-    x: 20,
-    y: 610,
-    width: 540,
-    height: 410,
+    height: 990,
   },
   {
     id: "product",
     title: "製品・ナレッジ オントロジー",
-    sub: "Knowledge / Domain / Part / Issue / Topic / Document / New knowledge",
+    sub: "Knowledge / Domain / Part / Issue / Topic / Document / 登録知見（Merge済みのみ）",
     x: 590,
     y: 30,
     width: 1010,
@@ -321,6 +310,29 @@ export function textWidth(text: string, fontSize: number) {
     width += /[\u0000-ÿ]/.test(char) ? fontSize * 0.58 : fontSize;
   }
   return width;
+}
+
+/** Splits a label into at most `maxLines` lines; the last line is shortened. */
+export function wrapText(
+  text: string,
+  maxWidth: number,
+  fontSize: number,
+  maxLines = 2,
+) {
+  const lines: string[] = [];
+  let rest = text;
+  while (rest && lines.length < maxLines - 1) {
+    let line = "";
+    for (const char of rest) {
+      if (textWidth(line + char, fontSize) > maxWidth) break;
+      line += char;
+    }
+    if (line === rest) break;
+    lines.push(line);
+    rest = rest.slice(line.length);
+  }
+  if (rest) lines.push(fitText(rest, maxWidth, fontSize));
+  return lines;
 }
 
 export function fitText(text: string, maxWidth: number, fontSize: number) {
@@ -506,23 +518,6 @@ function buildBase(caseId: BaseScenarioId): {
     edge(`dept-${cluster.id}`, teamId, "structure", "配下");
     edge(expertNodeId(expert.id), teamId, "organization", "所属");
   });
-  nodes.push(
-    node({
-      id: "person-yamada",
-      kind: "person",
-      layer: "org",
-      typeLabel: "設計者 / Person",
-      label: "山田 太郎",
-      sub: "デモ利用者",
-      x: 95,
-      y: 515,
-      w: 120,
-      h: 54,
-      path: "Organization → 製品設計部 → 山田 太郎",
-      desc: "製品設計部の設計者（デモ利用者）。相談を起票し、回答を設計へ持ち帰ります。",
-    }),
-  );
-  edge("person-yamada", "dept-design", "organization", "所属");
 
   // ── Product / knowledge ontology
   nodes.push(
@@ -698,9 +693,6 @@ function baseFor(caseId: BaseScenarioId) {
   return baseCache.get(caseId)!;
 }
 
-const cut = (text: string, length: number) =>
-  text.length > length ? `${text.slice(0, length)}…` : text;
-
 /** Automatic connections from a saved note to topic nodes of its cluster. */
 function topicLinks(item: Knowledge, cluster: ClusterDef) {
   const content = [
@@ -721,20 +713,21 @@ function topicLinks(item: Knowledge, cluster: ClusterDef) {
 export type OntologyView = {
   stage: OntologyStage;
   clusters: ClusterBounds[];
+  /** Approved ontology only: base knowledge plus Merged notes. */
   nodes: OntologyNode[];
   edges: OntologyEdge[];
-  /** Elements added by the registration shown as NEW in this stage. */
+  /** Merged notes and their relations, marked NEW in ② / ③. */
   newNodeIds: string[];
   newEdgeIds: string[];
-  /** Elements showing how the registered knowledge was used (stage ④). */
+  /** ④ only: what the current answer used. Never part of the saved ontology. */
   usedNodeIds: string[];
   usedEdgeIds: string[];
+  /** ④ only: temporary lines from the used note to what the answer applied it to. */
+  overlayEdges: OntologyEdge[];
   focusNodeId?: string;
-  cycleOne?: Knowledge;
-  cycleTwo?: Knowledge;
+  registered: Knowledge[];
   usage?: KnowledgeUsage;
   availability: Record<OntologyStage, boolean>;
-  notice?: string;
   /** Source IDs of the registered knowledge that are not drawn as nodes. */
   hiddenSources: string[];
 };
@@ -746,19 +739,22 @@ export function defaultStage(
 }
 
 /**
- * Builds the ontology for one theme and stage. Pure: switching to "before"
- * only changes what is drawn and never changes the saved knowledge.
+ * Builds the ontology for one theme and stage. Only approved (Merged)
+ * knowledge becomes part of the graph. Consultations and answers are not
+ * stored in it: stage ④ overlays what the current answer used on top of the
+ * approved graph. Pure: switching stages never changes the saved knowledge.
  */
 export function buildOntology({
   knowledge,
-  usageRecords,
   scenario,
   stage: requestedStage,
+  overlay,
 }: {
   knowledge: Knowledge[];
-  usageRecords: KnowledgeUsage[];
   scenario: Scenario;
   stage: OntologyStage;
+  /** The current answer's use of registered knowledge (session only). */
+  overlay?: KnowledgeUsage | null;
 }): OntologyView {
   const baseScenario =
     scenarios.find((item) => item.id === scenario.followUp?.baseScenarioId) ??
@@ -769,14 +765,20 @@ export function buildOntology({
   const cluster = clusters[0];
   const cx = centerX(cluster);
   const base = baseFor(cluster.id);
-  const latestCycleOne = cycleOneKnowledge(knowledge, baseScenario);
-  const usage = latestUsageFor(usageRecords, knowledge, baseScenario);
-  const cycleTwo = cycleTwoKnowledge(knowledge, followUp);
+  const first = cycleOneKnowledge(knowledge, baseScenario);
+  const second = cycleTwoKnowledge(knowledge, followUp);
+  const usage =
+    overlay &&
+    first &&
+    latestUsageFor([overlay], knowledge, baseScenario) &&
+    overlay.usedKnowledge.some((item) => item.id === first.id)
+      ? overlay
+      : undefined;
   const availability: Record<OntologyStage, boolean> = {
     before: true,
-    after: Boolean(latestCycleOne),
-    focus: Boolean(latestCycleOne),
-    usage: Boolean(usage || cycleTwo),
+    after: Boolean(first || second),
+    focus: Boolean(first || second),
+    usage: Boolean(usage),
   };
   const stage = availability[requestedStage] ? requestedStage : "before";
   const nodes = base.nodes.map((item) => ({ ...item }));
@@ -787,58 +789,44 @@ export function buildOntology({
     target: string,
     kind: EdgeKind,
     label: string,
-    phase: Phase,
     extra: Partial<OntologyEdge> = {},
   ) => {
     if (!hasNode(source) || !hasNode(target)) return;
     const id = `${source}>${target}`;
     if (edges.some((item) => item.id === id)) return;
-    edges.push({ id, source, target, kind, label, phase, ...extra });
+    edges.push({ id, source, target, kind, label, phase: "cycle1", ...extra });
   };
   const issueIds = (label?: string) =>
     cluster.issues.flatMap((issue, index) =>
       !label || issue.label === label ? [`issue-${cluster.id}-${index}`] : [],
     );
   const hiddenSources: string[] = [];
-
-  const usedCycleOne = usage
-    ? knowledge.find((item) => item.id === usage.usedKnowledge[0].id)
-    : undefined;
-  const cycleOne =
-    stage === "before"
-      ? undefined
-      : stage === "usage" && usedCycleOne
-        ? usedCycleOne
-        : latestCycleOne;
-  const showCycleTwo = stage === "usage";
-
   const knowledgeWidth = Math.min(240, cluster.width - 60);
-  // 適用条件 sits to the left so the 発展元 relation of the second-cycle note stays clear.
-  const conditionWidth = 130;
+
   const addKnowledgeNode = (
     item: Knowledge,
     id: string,
     y: number,
-    phase: Phase,
-    label: string,
+    x: number,
+    w: number,
   ) => {
     const reviewer = item.provenance?.review.reviewer;
     nodes.push(
       node({
         id,
         kind: "knowledge",
-        layer: "cycle",
-        typeLabel: `${label} · ${shortId(item.id)}`,
+        layer: "registered",
+        typeLabel: `登録知見 · ${shortId(item.id)}`,
         label: item.title,
         sub: `${item.author} · ${item.date}`,
-        x: phase === "cycle2" ? cx + Math.min(30, (cluster.width - knowledgeWidth) / 2 - 6) : cx,
+        x,
         y,
-        w: knowledgeWidth,
-        h: 60,
+        w,
+        h: 74,
         cluster: cluster.id,
         knowledgeId: item.id,
-        phase,
-        path: `Knowledge → ${cluster.domain} → ${label}`,
+        phase: "cycle1",
+        path: `Knowledge → ${cluster.domain} → 登録知見（Merge済み）`,
         desc: item.summary,
         facts: [
           { label: "ID", value: item.id },
@@ -849,6 +837,12 @@ export function buildOntology({
               ? `${reviewer}（模擬レビュー）· Approve後にMerge`
               : "承認記録なし",
           },
+          ...(item.conditions
+            ? [{ label: "適用条件", value: item.conditions }]
+            : []),
+          ...(item.provenance
+            ? [{ label: "元の相談", value: item.provenance.question }]
+            : []),
           { label: "タグ", value: item.tags.join(" / ") },
           ...(item.provenance?.basedOn?.length
             ? [
@@ -864,237 +858,122 @@ export function buildOntology({
       }),
     );
     const reviewerId = personIdByName(reviewer ?? item.author);
-    if (reviewerId) add(reviewerId, id, "approval", "承認（模擬）", phase);
-    const sourceIds = item.provenance?.sourceIds ?? [];
-    for (const sourceId of sourceIds) {
-      // A displayed note (e.g. the first-cycle knowledge) is linked as 発展元 instead.
-      if (nodes.some((entry) => entry.knowledgeId === sourceId && entry.kind === "knowledge")) {
-        continue;
-      }
+    if (reviewerId) add(reviewerId, id, "approval", "承認（模擬）");
+    for (const sourceId of item.provenance?.sourceIds ?? []) {
+      // A displayed note is linked by 発展元 instead of 参照.
+      if (registered.some((entry) => entry.id === sourceId)) continue;
       if (hasNode(`doc-${sourceId}`)) {
-        add(id, `doc-${sourceId}`, "reference", "参照", phase);
-      } else if (phase === "cycle1" || showCycleTwo) {
+        add(id, `doc-${sourceId}`, "reference", "参照");
+      } else {
         hiddenSources.push(sourceId);
       }
     }
     for (const link of topicLinks(item, cluster)) {
-      add(id, `topic-${cluster.id}-${link.topic.label}`, "tag", link.label, phase);
+      add(id, `topic-${cluster.id}-${link.topic.label}`, "tag", link.label);
     }
   };
 
-  if (cycleOne) {
-    if (cycleOne.provenance) {
-      nodes.push(
-        node({
-          id: "consult-1",
-          kind: "consultation",
-          layer: "cycle",
-          typeLabel: "相談 · 第1サイクル",
-          label: cycleOne.provenance.question,
-          sub: "山田 太郎の相談",
-          x: 150,
-          y: 720,
-          w: 230,
-          h: 56,
-          cluster: cluster.id,
-          phase: "cycle1",
-          path: "Consultation → 第1サイクル",
-          desc: cycleOne.provenance.question,
-          facts: [
-            {
-              label: "参照した既存ナレッジ",
-              value: `${cycleOne.provenance.sourceIds.length}件`,
-            },
-            {
-              label: "対話",
-              value: `${cycleOne.provenance.dialogue.length}メッセージ`,
-            },
-          ],
-        }),
-      );
-      add("person-yamada", "consult-1", "organization", "相談者", "cycle1");
+  const registered = stage === "before" ? [] : [first, second].filter(
+    (item): item is Knowledge => Boolean(item),
+  );
+  if (stage !== "before") {
+    // Two notes sit side by side so neither one's relations run through the other.
+    const pair = Boolean(first && second);
+    const pairWidth = Math.floor((cluster.width - 20 - 64) / 2);
+    const width = pair ? pairWidth : knowledgeWidth;
+    const leftX = cluster.x + 10 + pairWidth / 2;
+    const rightX = cluster.x + cluster.width - 10 - pairWidth / 2;
+    if (first) {
+      addKnowledgeNode(first, "knowledge-1", 790, pair ? leftX : cx, width);
       for (const issueId of issueIds(cluster.issues[0].label)) {
-        add("consult-1", issueId, "structure", "相談課題", "cycle1");
+        add("knowledge-1", issueId, "structure", "対象課題");
       }
     }
-    addKnowledgeNode(cycleOne, "knowledge-1", 785, "cycle1", "登録知見");
-    add("knowledge-1", "consult-1", "reference", "抽出元（対話）", "cycle1");
-    for (const issueId of issueIds(cluster.issues[0].label)) {
-      add("knowledge-1", issueId, "structure", "対象課題", "cycle1");
-    }
-    if (cycleOne.conditions) {
-      nodes.push(
-        node({
-          id: "condition-1",
-          kind: "condition",
-          layer: "cycle",
-          typeLabel: "適用条件",
-          label: cut(cycleOne.conditions, 40),
-          x: cluster.x + 10 + conditionWidth / 2,
-          y: 872,
-          w: conditionWidth,
-          h: 44,
-          cluster: cluster.id,
-          phase: "cycle1",
-          path: `Knowledge → ${cluster.domain} → 登録知見 → 適用条件`,
-          desc: cycleOne.conditions,
-          facts: [{ label: "登録知見", value: cycleOne.title }],
-        }),
-      );
-      add("knowledge-1", "condition-1", "approval", "適用条件", "cycle1");
-    }
-  }
-
-  if (showCycleTwo) {
-    const issue = issueIds(followUp.followUp!.issue);
-    const question = usage?.question ?? cycleTwo?.provenance?.question;
-    if (question) {
-      nodes.push(
-        node({
-          id: "consult-2",
-          kind: "consultation",
-          layer: "cycle",
-          typeLabel: "相談 · 第2サイクル",
-          label: question,
-          sub: `関連相談：${followUp.label}`,
-          x: 150,
-          y: 860,
-          w: 230,
-          h: 56,
-          cluster: cluster.id,
-          phase: "cycle2",
-          path: "Consultation → 第2サイクル",
-          desc: question,
-          facts: [
-            {
-              label: "第1サイクル知見",
-              value: usage
-                ? `${usage.usedKnowledge[0].title}（${shortId(usage.usedKnowledge[0].id)}）を検索でヒット`
-                : "使用なし（未登録、または検索で未ヒット）",
-            },
-          ],
-        }),
-      );
-      add("person-yamada", "consult-2", "organization", "相談者", "cycle2");
-      for (const issueId of issue) {
-        add("consult-2", issueId, "structure", "相談課題", "cycle2");
-      }
-    }
-    if (usage && cycleOne) {
-      nodes.push(
-        node({
-          id: "answer-2",
-          kind: "answer",
-          layer: "cycle",
-          typeLabel: "回答 · 第2サイクル",
-          label: "回答・設計確認事項",
-          sub: `${usage.checks.length}件の確認事項`,
-          x: 425,
-          y: 860,
-          w: 200,
-          h: 56,
-          cluster: cluster.id,
-          phase: "cycle2",
-          path: "Consultation → 第2サイクル → 回答",
-          desc: `登録知見「${usage.usedKnowledge[0].title}」を回答と設計確認事項に使用しました。`,
-          facts: usage.checks.map((check) => ({
-            label: check.label,
-            value: check.sources
-              .map((source) =>
-                source.kind === "knowledge"
-                  ? `登録知見 ${shortId(source.knowledgeId)} ${source.location}`
-                  : source.label,
-              )
-              .join(" + "),
-          })),
-        }),
-      );
-      add("consult-2", "answer-2", "structure", "回答", "cycle2");
-      add("consult-2", "knowledge-1", "usage", "検索でヒット", "cycle2", {
-        used: true,
-      });
-      add("answer-2", "knowledge-1", "usage", "回答に使用", "cycle2", {
-        used: true,
-      });
-      for (const check of usage.checks) {
-        if (!check.topic) continue;
-        add(
-          "answer-2",
-          `topic-${cluster.id}-${check.topic}`,
-          check.usesKnowledge ? "usage" : "structure",
-          check.usesKnowledge ? "確認事項（登録知見）" : "確認事項（今回の対話）",
-          "cycle2",
-          { used: check.usesKnowledge },
-        );
-      }
-    }
-    if (cycleTwo) {
-      addKnowledgeNode(cycleTwo, "knowledge-2", 952, "cycle2", "第2サイクル登録");
-      add("knowledge-2", "consult-2", "reference", "抽出元（対話）", "cycle2");
-      for (const issueId of issue) {
-        add("knowledge-2", issueId, "structure", "対象課題", "cycle2");
+    if (second) {
+      addKnowledgeNode(second, "knowledge-2", 790, pair ? rightX : cx, width);
+      for (const issueId of issueIds(followUp.followUp!.issue)) {
+        add("knowledge-2", issueId, "structure", "対象課題");
       }
       if (
-        cycleOne &&
-        cycleTwo.provenance?.basedOn?.some((item) => item.id === cycleOne.id)
+        first &&
+        second.provenance?.basedOn?.some((item) => item.id === first.id)
       ) {
-        add("knowledge-2", "knowledge-1", "reference", "発展元", "cycle2");
+        add("knowledge-2", "knowledge-1", "reference", "発展元");
       }
     }
   }
 
-  const phaseOf = (item: { phase?: Phase }) => item.phase;
-  const newPhase: Phase | undefined =
-    stage === "after" || stage === "focus"
-      ? "cycle1"
-      : stage === "usage"
-        ? "cycle2"
-        : undefined;
-  const usedEdgeIds = edges.filter((item) => item.used).map((item) => item.id);
-  const usedNodeIds =
-    usedEdgeIds.length > 0 ? ["knowledge-1", "consult-2", "answer-2"] : [];
-  const notice =
-    stage === "usage" && !usage
-      ? "第2サイクルの回答では、第1サイクルの登録知見を使っていません（未登録、または検索で未ヒット）。"
-      : stage === "usage" &&
-          usedCycleOne &&
-          latestCycleOne &&
-          usedCycleOne.id !== latestCycleOne.id
-        ? "第2サイクルで使われたのは、最新ではない第1サイクル知見です。使われた知見を表示しています。"
-        : undefined;
+  // ④: highlight what the current answer used; nothing is added to the ontology.
+  const usedNodeIds: string[] = [];
+  const usedEdgeIds: string[] = [];
+  const overlayEdges: OntologyEdge[] = [];
+  if (stage === "usage" && usage) {
+    usedNodeIds.push("knowledge-1");
+    const targets: { id: string; label: string }[] = [
+      ...issueIds(followUp.followUp!.issue).map((id) => ({
+        id,
+        label: "今回の質問に使用",
+      })),
+      ...usage.checks
+        .filter((check) => check.usesKnowledge && check.topic)
+        .map((check) => ({
+          id: `topic-${cluster.id}-${check.topic}`,
+          label: "回答で使用",
+        })),
+    ];
+    for (const target of targets) {
+      if (!hasNode(target.id) || usedNodeIds.includes(target.id)) continue;
+      usedNodeIds.push(target.id);
+      const existing = edges.find(
+        (item) =>
+          (item.source === "knowledge-1" && item.target === target.id) ||
+          (item.target === "knowledge-1" && item.source === target.id),
+      );
+      if (existing) {
+        usedEdgeIds.push(existing.id);
+      } else {
+        overlayEdges.push({
+          id: `overlay:knowledge-1>${target.id}`,
+          source: "knowledge-1",
+          target: target.id,
+          kind: "usage",
+          label: target.label,
+          used: true,
+        });
+      }
+    }
+  }
+
+  const latest = [...registered].sort((a, b) =>
+    (b.provenance?.review.mergedAt ?? "").localeCompare(
+      a.provenance?.review.mergedAt ?? "",
+    ),
+  )[0];
+  const latestNodeId = latest
+    ? latest.id === first?.id
+      ? "knowledge-1"
+      : "knowledge-2"
+    : undefined;
+  const marksNew = stage === "after" || stage === "focus";
   return {
     stage,
     clusters: boundsFor(clusters),
     nodes,
     edges,
-    newNodeIds: newPhase
-      ? nodes
-          .filter((item) => phaseOf(item) === newPhase && item.kind !== "answer")
-          .filter((item) => !usedNodeIds.includes(item.id))
-          .map((item) => item.id)
+    newNodeIds: marksNew
+      ? nodes.filter((item) => item.phase).map((item) => item.id)
       : [],
-    newEdgeIds: newPhase
-      ? edges
-          .filter((item) => phaseOf(item) === newPhase && !item.used)
-          .map((item) => item.id)
+    newEdgeIds: marksNew
+      ? edges.filter((item) => item.phase).map((item) => item.id)
       : [],
     usedNodeIds,
-    usedEdgeIds,
+    usedEdgeIds: [...usedEdgeIds, ...overlayEdges.map((item) => item.id)],
+    overlayEdges,
     focusNodeId:
-      stage === "focus"
-        ? "knowledge-1"
-        : stage === "usage"
-          ? usage
-            ? "answer-2"
-            : cycleTwo
-              ? "knowledge-2"
-              : undefined
-          : undefined,
-    cycleOne,
-    cycleTwo: showCycleTwo ? cycleTwo : undefined,
-    usage: showCycleTwo ? usage : undefined,
+      stage === "focus" ? latestNodeId : stage === "usage" ? "knowledge-1" : undefined,
+    registered,
+    usage: stage === "usage" ? usage : undefined,
     availability,
-    notice,
     hiddenSources: [...new Set(hiddenSources)],
   };
 }
@@ -1127,17 +1006,18 @@ export function boundsOf(nodes: OntologyNode[], padding = 40): Box {
 
 /** Nodes the camera should frame for a stage. */
 export function stageFrameNodes(view: OntologyView, scenario: Scenario) {
-  const ids = new Set<string>();
-  const addNeighbourhood = (id: string) =>
-    neighbours(view, id).forEach((item) => ids.add(item));
+  const baseId = scenario.followUp?.baseScenarioId ?? scenario.id;
   if (view.stage === "before") {
-    const baseId = scenario.followUp?.baseScenarioId ?? scenario.id;
     return view.nodes.filter(
       (item) => item.cluster === baseId || item.layer === "org",
     );
   }
+  const ids = new Set<string>();
+  const addNeighbourhood = (id: string) =>
+    neighbours(view, id).forEach((item) => ids.add(item));
   if (view.stage === "usage") {
-    [...view.usedNodeIds, ...view.newNodeIds].forEach(addNeighbourhood);
+    view.usedNodeIds.forEach((id) => ids.add(id));
+    addNeighbourhood("knowledge-1");
   } else if (view.focusNodeId) {
     addNeighbourhood(view.focusNodeId);
   } else {
@@ -1251,7 +1131,7 @@ export function placeEdgeLabels(
   const score = (result: LabelPlacement[]) =>
     result.reduce((sum, label) => {
       const edge = edges.find((item) => item.id === label.edgeId)!;
-      return sum + 1000 ** (3 - Math.min(3, priority(edge)));
+      return sum + 1000 ** (5 - Math.min(5, priority(edge)));
     }, 0);
   let best: LabelPlacement[] = [];
   for (const tieBreak of tieBreaks) {
@@ -1267,6 +1147,26 @@ const LABEL_POSITIONS = [
   0.5, 0.4, 0.6, 0.32, 0.68, 0.25, 0.75, 0.18, 0.82, 0.88, 0.12, 0.92, 0.08,
   0.95, 0.97, 0.03,
 ];
+
+/** Relation names that carry the story and should win label space. */
+export const KEY_RELATIONS = ["発展元", "承認（模擬）", "対象課題", "今回の質問に使用", "回答で使用"];
+
+/** Label priority shared by the views and tests: lower is placed first. */
+export function labelPriority(
+  view: Pick<OntologyView, "usedEdgeIds" | "newEdgeIds">,
+  active: Set<string> = new Set(),
+) {
+  return (edge: OntologyEdge) =>
+    view.usedEdgeIds.includes(edge.id)
+      ? 0
+      : view.newEdgeIds.includes(edge.id)
+        ? KEY_RELATIONS.includes(edge.label)
+          ? 1
+          : 2
+        : active.has(edge.id)
+          ? 3
+          : 4;
+}
 
 export function countSummary(view: OntologyView) {
   return {
