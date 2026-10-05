@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   ArrowUpRight,
   ArrowRight,
@@ -16,18 +16,20 @@ import {
   MessageSquare,
   FileText,
   Download,
-  Maximize2,
   HelpCircle,
   ShieldCheck,
   Lightbulb,
-  Target,
   Layers,
   Menu,
   CheckCircle2,
+  RefreshCcw,
 } from "lucide-react";
 import {
   experts,
   scenarios,
+  followUpScenarios,
+  baseScenarioOf,
+  followUpOf,
   matchScenario,
   initialKnowledge,
   mergeKnowledge,
@@ -37,6 +39,20 @@ import {
 } from "./data";
 
 import ProcessWorkspace from "./ProcessWorkspace";
+import OntologyGraph from "./OntologyGraph";
+import {
+  KNOWLEDGE_STORAGE_KEY,
+  USAGE_STORAGE_KEY,
+  addKnowledgeOnce,
+  appendUsageRecord,
+  buildUsageRecord,
+  cycleOneKnowledge,
+  prepareRun,
+  readStoredUsage,
+  shortId,
+  usageForKnowledge,
+  type KnowledgeUsage,
+} from "./knowledge-cycle";
 
 const filterLabels: Record<string, string> = {
   すべて: "All",
@@ -65,7 +81,9 @@ const steps = [
 ];
 function readKnowledge(): Knowledge[] {
   try {
-    const raw = JSON.parse(localStorage.getItem("takumi-knowledge") || "null");
+    const raw = JSON.parse(
+      localStorage.getItem(KNOWLEDGE_STORAGE_KEY) || "null",
+    );
     return Array.isArray(raw) &&
       raw.every(
         (x) =>
@@ -106,6 +124,10 @@ export default function App() {
   const [tick, setTick] = useState(-1);
   const [knowledge, setKnowledge] = useState<Knowledge[]>(readKnowledge);
   const [runKnowledge, setRunKnowledge] = useState<Knowledge[]>(knowledge);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [usageRecords, setUsageRecords] = useState<KnowledgeUsage[]>(() =>
+    readStoredUsage(localStorage),
+  );
   const [savedId, setSavedId] = useState<string | null>(null);
   const [modal, setModal] = useState<"help" | "export" | null>(null);
   const [exportContent, setExportContent] = useState("");
@@ -133,8 +155,25 @@ export default function App() {
     { speaker: "ai" | "expert"; text: string; annotation?: string }[]
   >([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const stage = tick < 0 ? 0 : tick < 2 ? 1 : tick < 3 ? 2 : tick < 9 ? 3 : 4;
+  const run = useMemo(
+    () => prepareRun({ query, scenario, knowledge: runKnowledge }),
+    [query, scenario, runKnowledge],
+  );
   const activeExpert = experts.find((x) => x.id === scenario.expertId)!;
+  // A second-cycle answer that cited first-cycle knowledge is recorded once it is compiled.
+  useEffect(() => {
+    if (tick < 9 || !runId) return;
+    if (usageRecords.some((record) => record.runId === runId)) return;
+    const record = buildUsageRecord(run, { runId, question: query });
+    if (!record) return;
+    const next = appendUsageRecord(usageRecords, record);
+    setUsageRecords(next);
+    try {
+      localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Session-only when storage is unavailable.
+    }
+  }, [tick, runId, run, query, usageRecords]);
   const dialogOpen = Boolean(modal || expertDetail || article);
   useEffect(() => {
     if (!running) return;
@@ -212,8 +251,11 @@ export default function App() {
       setToast("相談したい内容を入力するか、サンプルを選んでください。");
       return;
     }
+    const matched = matchScenario(query);
     setRunKnowledge([...knowledge]);
-    setScenario(matchScenario(query));
+    setScenario(matched);
+    setBrowseScenario(baseScenarioOf(matched));
+    setRunId(crypto.randomUUID());
     setRunning(true);
     setTick(0);
     setSavedId(null);
@@ -230,15 +272,32 @@ export default function App() {
     setAttachments([]);
     setSavedId(null);
     setExtraMessages([]);
+    setRunId(null);
     setPage("home");
+  };
+  /** Prepares a consultation without running it (sample chips, graph, profile). */
+  const prepareConsultation = (next: Scenario) => {
+    reset();
+    setQuery(next.question);
+    setScenario(next);
+    setSelectedExample(next.id);
+  };
+  const prepareFollowUp = (base: Scenario) => {
+    const next = followUpOf(base)!;
+    prepareConsultation(next);
+    setToast(
+      cycleOneKnowledge(knowledge, baseScenarioOf(next))
+        ? "第2サイクルの関連相談を用意しました。「Run agent」で登録知見の活用を確認できます。"
+        : "関連相談を用意しました。第1サイクルの知見は未登録のため、登録知見は使われません。",
+    );
   };
   const save = (item: Knowledge) => {
     if (savedId) return;
-    const next = [item, ...knowledge];
+    const next = addKnowledgeOnce(knowledge, item);
     setKnowledge(next);
     setSavedId(item.id);
     try {
-      localStorage.setItem("takumi-knowledge", JSON.stringify(next));
+      localStorage.setItem(KNOWLEDGE_STORAGE_KEY, JSON.stringify(next));
       setToast("登録PRをマージし、ナレッジライブラリに追加しました。");
     } catch {
       setToast(
@@ -247,7 +306,25 @@ export default function App() {
     }
   };
   const download = () => {
-    const content = `# ${scenario.title}\n\nデモシミュレーション / 実務適用前に専門家レビューが必要\n\n## 相談内容\n${query}\n\n## 抽出された知見\n${scenario.insight}\n\n## 設計への提案\n${scenario.recommendations.map((r) => `### ${r.title}\n${r.body}`).join("\n\n")}\n\n## 出典\n${activeExpert.name}との模擬インタビュー\n\n## 適用条件\n${scenario.conditions}\n\n## 対話記録\n${[...scenario.dialogue, ...extraMessages].map((m) => `${m.speaker === "ai" ? "AI" : activeExpert.name}: ${m.text}`).join("\n\n")}`;
+    const reuse = run.scenario.followUp
+      ? `\n\n## 第1サイクル知見の活用\n${
+          run.cycleOne
+            ? `使用した登録知見：${run.cycleOne.title}（ID ${run.cycleOne.id}）\n\n${run.checks
+                .map(
+                  (check) =>
+                    `- ${check.label}：${check.appliedAs}（根拠：${check.sources
+                      .map((source) =>
+                        source.kind === "knowledge"
+                          ? `登録知見 ${shortId(source.knowledgeId)} ${source.location}`
+                          : source.label,
+                      )
+                      .join(" + ")}）`,
+                )
+                .join("\n")}`
+            : "登録知見は使用していません。"
+        }`
+      : "";
+    const content = `# ${scenario.title}\n\nデモシミュレーション / 実務適用前に専門家レビューが必要\n\n## 相談内容\n${query}${reuse}\n\n## 抽出された知見\n${scenario.insight}\n\n## 設計への提案\n${scenario.recommendations.map((r) => `### ${r.title}\n${r.body}`).join("\n\n")}\n\n## 出典\n${activeExpert.name}との模擬インタビュー\n\n## 適用条件\n${scenario.conditions}\n\n## 対話記録\n${[...run.scenario.dialogue, ...extraMessages].map((m) => `${m.speaker === "ai" ? "AI" : activeExpert.name}: ${m.text}`).join("\n\n")}`;
     setExportContent(content);
     setModal("export");
   };
@@ -490,9 +567,9 @@ export default function App() {
               />
               {tick >= 0 ? (
                 <ProcessWorkspace
+                  key={runId ?? `${scenario.id}:${query}`}
                   query={query}
-                  scenario={scenario}
-                  knowledge={runKnowledge}
+                  run={run}
                   tick={tick}
                   running={running}
                   savedId={savedId}
@@ -509,6 +586,26 @@ export default function App() {
                     navigate("library");
                     setFilter("今回保存した知見");
                   }}
+                  renderMergeGraph={(id) => (
+                    <OntologyGraph
+                      variant="inline"
+                      knowledge={knowledge}
+                      usageRecords={usageRecords}
+                      scenario={baseScenarioOf(scenario)}
+                      initialStage={scenario.followUp ? "usage" : "focus"}
+                      focusKnowledgeId={id}
+                      onOpenGraph={() => {
+                        setBrowseScenario(baseScenarioOf(scenario));
+                        navigate("graph");
+                      }}
+                    />
+                  )}
+                  onStartFollowUp={
+                    scenario.followUp
+                      ? undefined
+                      : () => prepareFollowUp(baseScenarioOf(scenario))
+                  }
+                  followUpLabel={followUpOf(scenario)?.label}
                 />
               ) : (
                 <>
@@ -630,6 +727,43 @@ export default function App() {
                               </button>
                             ))}
                           </div>
+                          <div className="sample-label cycle-two-label">
+                            <RefreshCcw size={14} />
+                            第2サイクル：登録した知見を使う関連相談
+                          </div>
+                          <div className="sample-chips cycle-two-chips">
+                            {followUpScenarios.map((s) => {
+                              const registered = cycleOneKnowledge(
+                                knowledge,
+                                baseScenarioOf(s),
+                              );
+                              return (
+                                <button
+                                  className={
+                                    selectedExample === s.id ? "selected" : ""
+                                  }
+                                  key={s.id}
+                                  onClick={() => {
+                                    setQuery(s.question);
+                                    setScenario(s);
+                                    setSelectedExample(s.id);
+                                  }}
+                                  title={
+                                    registered
+                                      ? `第1サイクル知見「${registered.title}」を使います`
+                                      : "第1サイクルの知見が未登録のため、登録知見は使われません"
+                                  }
+                                >
+                                  {s.label}
+                                  <span
+                                    className={`cycle-state ${registered ? "ready" : ""}`}
+                                  >
+                                    {registered ? "知見登録済み" : "未登録"}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
                           <div className="consult-action">
                             <span>
                               <ShieldCheck size={14} />
@@ -666,20 +800,26 @@ export default function App() {
                         </button>
                       </div>
                       <div className="graph-subtitle">
-                        選択中のサンプルに関連する技術・課題・専門家
+                        選択中のテーマを中心に、組織・課題・ドキュメント・登録知見のつながりを表示
                       </div>
-                      <KnowledgeGraph scenario={scenario} stage={stage} />
+                      <OntologyGraph
+                        variant="card"
+                        knowledge={knowledge}
+                        usageRecords={usageRecords}
+                        scenario={baseScenarioOf(scenario)}
+                      />
                       <div className="graph-footer">
                         <span>
-                          <i className="legend-dot green" />
-                          技術・ノウハウ
+                          <i className="legend-dot blue" />
+                          組織・匠
                         </span>
                         <span>
                           <i className="legend-dot orange" />
-                          課題
+                          課題・観点
                         </span>
                         <span>
-                          <i className="legend-dot blue" />匠
+                          <i className="legend-dot green" />
+                          ドキュメント・登録知見
                         </span>
                         <button onClick={() => navigate("graph")}>
                           Explore graph
@@ -752,7 +892,7 @@ export default function App() {
             <>
               <PageHeading
                 title="Knowledge Graph"
-                description="テーマを選択し、技術・課題・専門家の関係を確認します。"
+                description="組織と製品・ナレッジのオントロジーで、登録した知見がどこにつながり、次の相談でどう使われたかを確認します。"
               />
               <div className="page-toolbar">
                 <div className="filter-tabs">
@@ -767,37 +907,47 @@ export default function App() {
                     </button>
                   ))}
                 </div>
-                <span className="muted">ノードをクリックして詳細を表示</span>
+                <span className="muted">ノードをクリックして関係と詳細を表示</span>
               </div>
-              <div className="card full-graph">
-                <KnowledgeGraph scenario={browseScenario} stage={4} large />
+              <div className="full-graph ontology-page">
+                <OntologyGraph
+                  variant="page"
+                  knowledge={knowledge}
+                  usageRecords={usageRecords}
+                  scenario={browseScenario}
+                  onArticle={setArticle}
+                />
               </div>
               <div className="graph-insight-grid">
                 <div className="card info-card">
                   <Network size={21} />
                   <h3>グラフの関係定義</h3>
                   <p>
-                    「課題 → 関連技術 → 対応ノウハウ →
-                    経験を持つ匠」の関係で、点在する社内知識を構造化しています。
+                    組織（部署・チーム・匠）と、製品・ナレッジ（工程領域・対象部品・課題・技術観点・ドキュメント）を分けて表示します。線の名称は「所属」「担当」「執筆」「参照」「適用条件」「回答に使用」などの関係で、タグや語の一致は点線の「タグ一致」「本文で言及」として区別し、因果関係としては扱いません。
                   </p>
                 </div>
                 <div className="card info-card">
                   <Lightbulb size={21} />
                   <h3>未確認の判断基準</h3>
                   <p>{browseScenario.gap}</p>
-                  <button
-                    className="text-button"
-                    disabled={running}
-                    onClick={() => {
-                      reset();
-                      setQuery(browseScenario.question);
-                      setScenario(browseScenario);
-                      setSelectedExample(browseScenario.id);
-                    }}
-                  >
-                    このテーマで相談する
-                    <ArrowRight size={14} />
-                  </button>
+                  <div className="info-card-actions">
+                    <button
+                      className="text-button"
+                      disabled={running}
+                      onClick={() => prepareConsultation(browseScenario)}
+                    >
+                      第1サイクル：このテーマで相談する
+                      <ArrowRight size={14} />
+                    </button>
+                    <button
+                      className="text-button"
+                      disabled={running}
+                      onClick={() => prepareFollowUp(browseScenario)}
+                    >
+                      第2サイクル：{followUpOf(browseScenario)?.label}
+                      <ArrowRight size={14} />
+                    </button>
+                  </div>
                 </div>
               </div>
             </>
@@ -1023,10 +1173,7 @@ export default function App() {
                       return;
                     }
                     const s = profileScenario;
-                    reset();
-                    setQuery(s.question);
-                    setScenario(s);
-                    setSelectedExample(s.id);
+                    prepareConsultation(s);
                     setExpertDetail(null);
                     setToast(
                       "相談内容を用意しました。「Run agent」から模擬インタビューを開始できます。",
@@ -1118,6 +1265,35 @@ export default function App() {
                         article.provenance.review.mergedAt,
                       ).toLocaleString("ja-JP")}
                     </p>
+                    {article.provenance.basedOn?.map((source) => (
+                      <p key={source.id} className="article-cycle">
+                        発展元（第1サイクル知見）：
+                        {knowledge.find((item) => item.id === source.id)
+                          ?.title ?? `${source.title}（現在は見つかりません）`}
+                        （{shortId(source.id)}）
+                      </p>
+                    ))}
+                    {usageForKnowledge(usageRecords, article.id).length > 0 && (
+                      <div className="article-cycle">
+                        <strong>第2サイクルでの活用</strong>
+                        {usageForKnowledge(usageRecords, article.id).map(
+                          (record) => (
+                            <p key={record.runId}>
+                              {new Date(record.answeredAt).toLocaleString(
+                                "ja-JP",
+                              )}
+                              ：「{record.question}」の回答で
+                              {
+                                record.checks.filter(
+                                  (check) => check.usesKnowledge,
+                                ).length
+                              }
+                              件の確認事項に使用
+                            </p>
+                          ),
+                        )}
+                      </div>
+                    )}
                     <details>
                       <summary>
                         参照したナレッジ（{article.provenance.sourceIds.length}
@@ -1191,7 +1367,7 @@ export default function App() {
                 <div className="demo-explanation">
                   <strong>デモの範囲</strong>
                   <p>
-                    AI処理・マッチング・対話は3つの登録済みシナリオによるシミュレーションです。自由入力はキーワードで参照シナリオに振り分けます。実際のAI
+                    AI処理・マッチング・対話は、3つの相談シナリオと、それぞれの登録知見を使う第2サイクルの関連相談によるシミュレーションです。専門家の回答はデモ用に準備した内容です。自由入力はキーワードで参照シナリオに振り分けます。実際のAI
                     API・社内データベース・メッセージ送信サービスには接続していません。添付ファイルの内容は解析しません。
                   </p>
                 </div>
@@ -1309,249 +1485,5 @@ function KnowledgeRow({
       <span className="knowledge-date">{item.date}</span>
       <ArrowUpRight size={17} />
     </button>
-  );
-}
-function KnowledgeGraph({
-  scenario,
-  stage,
-  large = false,
-}: {
-  scenario: Scenario;
-  stage: number;
-  large?: boolean;
-}) {
-  const [selected, setSelected] = useState<number | null>(null);
-  const [zoom, setZoom] = useState(1);
-  useEffect(() => setSelected(null), [scenario.id]);
-  const expert = experts.find((e) => e.id === scenario.expertId)!;
-  const nodes = [
-    {
-      x: 257,
-      y: 168,
-      r: 37,
-      label:
-        scenario.id === "aluminum"
-          ? "加工変形"
-          : scenario.id === "welding"
-            ? "溶接ひずみ"
-            : "ヒケ対策",
-      type: "issue",
-      detail:
-        "設計・製造で解決したい課題。関連する材料、工程、経験を持つ匠へとつながっています。",
-    },
-    {
-      x: 129,
-      y: 100,
-      r: 27,
-      label: scenario.tags[0],
-      type: "tech",
-      detail: scenario.recommendations[0].body,
-    },
-    {
-      x: 155,
-      y: 246,
-      r: 30,
-      label: scenario.id === "molding" ? "リブ設計" : "治具設計",
-      type: "tech",
-      detail: scenario.recommendations[0].body,
-    },
-    {
-      x: 358,
-      y: 89,
-      r: 27,
-      label:
-        scenario.id === "welding"
-          ? "入熱管理"
-          : scenario.id === "molding"
-            ? "保圧条件"
-            : "残留応力",
-      type: "tech",
-      detail: scenario.recommendations[1].body,
-    },
-    {
-      x: 386,
-      y: 227,
-      r: 28,
-      label: scenario.id === "molding" ? "金型設計" : "加工順序",
-      type: "tech",
-      detail: scenario.recommendations[1].body,
-    },
-    {
-      x: 286,
-      y: 298,
-      r: 25,
-      label: expert.name,
-      type: "person",
-      detail: `${expert.role}。現場経験${expert.years}年。${expert.quote}`,
-    },
-    {
-      x: 73,
-      y: 202,
-      r: 17,
-      label: scenario.id === "molding" ? "充填性" : "寸法精度",
-      type: "muted",
-      detail: scenario.recommendations[2].body,
-    },
-    {
-      x: 249,
-      y: 49,
-      r: 18,
-      label: scenario.id === "molding" ? "樹脂材料" : "材料特性",
-      type: "muted",
-      detail:
-        "材料の状態と履歴は、加工や成形の結果に影響するため、条件と一緒に記録します。",
-    },
-    {
-      x: 454,
-      y: 143,
-      r: 17,
-      label: "品質改善",
-      type: "muted",
-      detail: "改善前後の条件と評価値を記録し、再現できる知識に整理します。",
-    },
-  ];
-  const edges = [
-    [0, 1],
-    [0, 2],
-    [0, 3],
-    [0, 4],
-    [0, 5],
-    [1, 2],
-    [1, 7],
-    [1, 6],
-    [2, 6],
-    [2, 5],
-    [3, 7],
-    [3, 4],
-    [3, 8],
-    [4, 8],
-    [4, 5],
-  ];
-  return (
-    <div className={`knowledge-graph ${large ? "large" : ""}`}>
-      <div className="graph-top-label">
-        <span className="tiny-dot" />
-        {stage > 0 ? "関連ナレッジを表示中" : "ナレッジマップ"}
-        <span>9 NODES · 15 LINKS</span>
-      </div>
-      <svg
-        viewBox="0 0 520 355"
-        role="img"
-        aria-label={`${scenario.label}に関連する技術・課題・匠のナレッジグラフ`}
-      >
-        <defs>
-          <radialGradient id={large ? "glow-large" : "glow"}>
-            <stop offset="0%" stopColor="#A100FF" stopOpacity=".14" />
-            <stop offset="100%" stopColor="#A100FF" stopOpacity="0" />
-          </radialGradient>
-        </defs>
-        <g transform={`translate(260 177) scale(${zoom}) translate(-260 -177)`}>
-          <circle
-            cx="257"
-            cy="168"
-            r="145"
-            fill={`url(#${large ? "glow-large" : "glow"})`}
-          />
-          {edges.map(([a, b], i) => (
-            <g key={i}>
-              <line
-                x1={nodes[a].x}
-                y1={nodes[a].y}
-                x2={nodes[b].x}
-                y2={nodes[b].y}
-                className={`graph-edge ${selected === a || selected === b ? "highlight" : ""}`}
-                strokeDasharray={a === 0 ? undefined : "3 4"}
-              />
-              {large && a === 0 && (
-                <text
-                  x={(nodes[a].x + nodes[b].x) / 2}
-                  y={(nodes[a].y + nodes[b].y) / 2 - 5}
-                  className="edge-label"
-                >
-                  {b === 5 ? "経験を持つ" : "関連する"}
-                </text>
-              )}
-            </g>
-          ))}
-          {nodes.map((n, i) => (
-            <g
-              key={i}
-              className={`graph-node ${n.type} ${selected === i ? "selected" : ""}`}
-              role="button"
-              tabIndex={0}
-              aria-label={`${n.label}の詳細`}
-              onClick={() => setSelected(selected === i ? null : i)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setSelected(selected === i ? null : i);
-                }
-              }}
-            >
-              <circle className="node-halo" cx={n.x} cy={n.y} r={n.r + 6} />
-              <circle className="node-circle" cx={n.x} cy={n.y} r={n.r} />
-              {n.type === "issue" ? (
-                <g transform={`translate(${n.x - 9} ${n.y - 9})`}>
-                  <Target size={18} />
-                </g>
-              ) : n.type === "person" ? (
-                <g transform={`translate(${n.x - 8} ${n.y - 8})`}>
-                  <Users size={16} />
-                </g>
-              ) : (
-                <g transform={`translate(${n.x - 7} ${n.y - 7})`}>
-                  <Layers size={14} />
-                </g>
-              )}
-              <text x={n.x} y={n.y + n.r + 20} textAnchor="middle">
-                {n.label}
-              </text>
-            </g>
-          ))}
-        </g>
-      </svg>
-      {selected !== null && (
-        <div className="node-detail">
-          <button
-            aria-label="ノード詳細を閉じる"
-            onClick={() => setSelected(null)}
-          >
-            <X size={13} />
-          </button>
-          <strong>{nodes[selected].label}</strong>
-          <p>{nodes[selected].detail}</p>
-        </div>
-      )}
-      <div className="graph-controls">
-        <button
-          title="拡大"
-          aria-label="グラフを拡大"
-          disabled={zoom >= 1.6}
-          onClick={() => setZoom((v) => Math.min(1.6, v + 0.2))}
-        >
-          <Plus size={15} />
-        </button>
-        <button
-          title="縮小"
-          aria-label="グラフを縮小"
-          disabled={zoom <= 0.6}
-          onClick={() => setZoom((v) => Math.max(0.6, v - 0.2))}
-        >
-          <span>−</span>
-        </button>
-        <span />
-        <button
-          title="表示をリセット"
-          aria-label="グラフの表示をリセット"
-          onClick={() => {
-            setZoom(1);
-            setSelected(null);
-          }}
-        >
-          <Maximize2 size={13} />
-        </button>
-      </div>
-      <div className="graph-hint">ノードを選択して、つながりを探索</div>
-    </div>
   );
 }

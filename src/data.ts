@@ -1,7 +1,10 @@
 import { additionalExperts } from "./expert-seeds.ts";
 import { additionalKnowledge } from "./knowledge-seeds.ts";
 
-export type ScenarioId = "aluminum" | "welding" | "molding";
+export type BaseScenarioId = "aluminum" | "welding" | "molding";
+/** Second-cycle consultation that reuses the knowledge registered in the first cycle. */
+export type FollowUpScenarioId = `${BaseScenarioId}-c2`;
+export type ScenarioId = BaseScenarioId | FollowUpScenarioId;
 export type Expert = {
   id: number;
   name: string;
@@ -77,6 +80,36 @@ export type Scenario = {
   insight: string;
   recommendations: { title: string; body: string }[];
   conditions: string;
+  /** Present only on second-cycle consultations. */
+  followUp?: FollowUpPlan;
+};
+/**
+ * How a second-cycle answer may reuse the registered first-cycle knowledge.
+ * Passages are searched in the saved knowledge itself; a rule without a match
+ * is answered from the new interview only.
+ */
+export type ReuseRule = {
+  id: string;
+  label: string;
+  /** Topic node label in the ontology graph (確認観点). */
+  topic?: string;
+  /** Keywords searched in the saved knowledge (recommendations → dialogue → conditions). */
+  find: string[];
+  /** Prepared demo text: how the passage is applied to this consultation. */
+  appliedAs: string;
+  /** Index of the supporting expert answer in this scenario's dialogue. */
+  answerIndex?: number;
+};
+export type FollowUpPlan = {
+  baseScenarioId: BaseScenarioId;
+  /** Issue node label in the ontology graph that this consultation addresses. */
+  issue: string;
+  /** Q1 used when first-cycle knowledge was retrieved. {title} / {id} are replaced. */
+  questionWithKnowledge: string;
+  annotationWithKnowledge: string;
+  /** Gap sentence appended after the generated "registered knowledge covers …" prefix. */
+  remainingGap: string;
+  reuse: ReuseRule[];
 };
 export const scenarios: Scenario[] = [
   {
@@ -263,15 +296,348 @@ export const scenarios: Scenario[] = [
       "架空の射出成形事例です。樹脂グレードや金型仕様で適切な条件が異なるため、材料指針と試作で検証してください。",
   },
 ];
-export function matchScenario(q: string): Scenario {
+export const followUpScenarios: Scenario[] = [
+  {
+    id: "aluminum-c2",
+    label: "派生品の壁形状変更",
+    question:
+      "薄肉アルミハウジングの派生品で、壁の形状が変わります。治具と加工工程で、事前に確認すべき点は？",
+    title: "派生品の薄肉ハウジングで、支持と拘束解放の手順を流用する",
+    tags: ["薄肉加工", "治具設計", "加工変形", "派生設計"],
+    expertId: 1,
+    related: [
+      "派生形状での治具の支持点",
+      "荒加工後の拘束解放と測定",
+      "元の形状の記録との比較",
+    ],
+    gap: "壁の形状が変わる派生品について、治具の支持点と拘束解放の手順をどこまで流用できるかの判断基準が見つかりません。",
+    dialogue: [
+      {
+        speaker: "ai",
+        text: "壁の形状が変わる派生品で、切削後の反りを防ぐために、最初に何を確認しますか？",
+      },
+      {
+        speaker: "expert",
+        text: "荒加工の後に拘束を解放し、自由状態で測る手順を入れます。壁の形が変わると支持できる面の位置も変わるので、治具の支持点は形状ごとに確認し直します。",
+        annotation: "デモ用の専門家回答",
+      },
+      {
+        speaker: "ai",
+        text: "支持点を見直すとき、元の形状の記録はどう使いますか？",
+        annotation: "比較の方法を深掘り",
+      },
+      {
+        speaker: "expert",
+        text: "元の形状と同じ項目で、固定時と解放時の差を測ります。差の出方が変われば、支持点と工程順序のどちらを見直すかを切り分けやすくなります。",
+        annotation: "デモ用の専門家回答",
+      },
+      {
+        speaker: "ai",
+        text: "設計側へ戻すべき点と、この流用が当てはまらない条件はありますか？",
+        annotation: "適用条件と設計への還元",
+      },
+      {
+        speaker: "expert",
+        text: "支持できる座面を設計段階で確保してもらう点は変わりません。壁の形状や素材の履歴が大きく違う場合は、取り代や締付力を試作で決め直す必要があります。",
+        annotation: "デモ用の専門家回答",
+      },
+    ],
+    insight:
+      "派生品でも、荒加工後に拘束を解放して測る手順は流用できる。壁の形状変更に合わせて支持点を確認し直し、元の形状と同じ項目で固定時・解放時の差を比較する。",
+    recommendations: [
+      {
+        title: "設計：派生形状でも支持座面を確保する",
+        body: "壁の形状変更で支持できる面が変わらないかを確認し、剛性のある座面を設計段階で確保する。",
+      },
+      {
+        title: "工程：解放・測定の手順を流用する",
+        body: "荒加工後の解放と自由状態の測定を派生品の工程にも入れ、元の形状と同じ項目で記録する。",
+      },
+      {
+        title: "検証：元の形状の記録と比較する",
+        body: "固定時と解放時の差を元の形状の記録と比較し、支持点と工程順序のどちらを見直すかを切り分ける。",
+      },
+    ],
+    conditions:
+      "架空の対話です。壁の形状や素材の履歴が異なる場合、取り代・締付力・寸法公差は派生品の試作で確認してください。",
+    followUp: {
+      baseScenarioId: "aluminum",
+      issue: "加工変形",
+      questionWithKnowledge:
+        "登録済みの知見「{title}」（{id}）を前提に確認します。壁の形状が変わる派生品でも、この知見の手順で足りない点はありますか？",
+      annotationWithKnowledge: "登録知見を前提に差分だけ確認",
+      remainingGap:
+        "壁の形状が変わる派生品で、どこまで流用でき、どこを確認し直すかの判断基準は未登録です。",
+      reuse: [
+        {
+          id: "support",
+          label: "治具の支持点",
+          topic: "治具設計",
+          find: ["支持"],
+          appliedAs:
+            "壁の形状変更で支持できる面が変わらないかを、登録知見の支持の考え方で確認する。",
+          answerIndex: 1,
+        },
+        {
+          id: "release",
+          label: "荒加工後の拘束解放",
+          topic: "薄肉加工",
+          find: ["解放"],
+          appliedAs:
+            "荒加工後に拘束を解放して自由状態で測る手順を、派生品の工程にも入れる。",
+          answerIndex: 1,
+        },
+        {
+          id: "compare",
+          label: "固定時と解放時の比較",
+          topic: "残留応力",
+          find: ["比較", "切り分け"],
+          appliedAs:
+            "元の形状と同じ項目で固定時・解放時の差を測り、支持点と工程順序のどちらを見直すかを切り分ける。",
+          answerIndex: 3,
+        },
+      ],
+    },
+  },
+  {
+    id: "welding-c2",
+    label: "派生品の溶接箇所追加",
+    question:
+      "ステンレス製ブラケットの派生品で、溶接箇所が増えます。ひずみを抑えるために、事前に確認すべき点は？",
+    title: "溶接箇所が増える派生品で、仮付け・順序・解放条件をそろえて比較する",
+    tags: ["溶接変形", "仮付け", "治具設計", "派生設計"],
+    expertId: 2,
+    related: [
+      "増えた溶接箇所と入熱の偏り",
+      "溶接順序案の比較",
+      "治具解放条件の統一",
+    ],
+    gap: "溶接箇所が増える派生品について、仮付け・溶接順序・治具解放の条件をどう組み直すかの判断基準が見つかりません。",
+    dialogue: [
+      {
+        speaker: "ai",
+        text: "溶接箇所が増える派生品で、ひずみを抑えるために最初に何を確認しますか？",
+      },
+      {
+        speaker: "expert",
+        text: "増えた溶接箇所を含めて、熱がどちらに偏るかを先に確認します。仮付けの配置と隙間は、元の製品と同じ項目で記録します。",
+        annotation: "デモ用の専門家回答",
+      },
+      {
+        speaker: "ai",
+        text: "溶接順序は、元の製品の順序をそのまま使えますか？",
+        annotation: "流用できる範囲を深掘り",
+      },
+      {
+        speaker: "expert",
+        text: "そのままでは使えないことがあります。増えた箇所を入れた順序案をいくつか作り、試験片で各工程の角度の変化を比べます。",
+        annotation: "デモ用の専門家回答",
+      },
+      {
+        speaker: "ai",
+        text: "治具の解放と、設計へのフィードバックはどうしますか？",
+        annotation: "解放条件と設計への還元",
+      },
+      {
+        speaker: "expert",
+        text: "解放時の温度条件は元の製品とそろえます。溶接量や接合位置は設計側と見直し、溶接条件は認定された手順の範囲で検証します。",
+        annotation: "デモ用の専門家回答",
+      },
+    ],
+    insight:
+      "溶接箇所が増える派生品では、仮付け・入熱の順序・拘束解放の条件を一組で管理する考え方を流用し、増えた箇所を含めた熱の偏りと順序案を試験片で比較する。",
+    recommendations: [
+      {
+        title: "設計：増えた溶接箇所の熱の偏りを確認する",
+        body: "増えた溶接箇所を含めて熱が偏る形状になっていないかを、設計側と確認する。",
+      },
+      {
+        title: "工程：順序案を試験片で比較する",
+        body: "増えた箇所を入れた溶接順序の案を作り、各工程の角度の変化を試験片で比べる。",
+      },
+      {
+        title: "検証：解放条件を元の製品とそろえる",
+        body: "治具を外す時の温度条件と記録項目を元の製品とそろえ、変形量を比較する。",
+      },
+    ],
+    conditions:
+      "架空の溶接事例です。材質・板厚・強度要件に応じて、承認済みの溶接施工要領と試験で妥当性を確認してください。",
+    followUp: {
+      baseScenarioId: "welding",
+      issue: "溶接ひずみ",
+      questionWithKnowledge:
+        "登録済みの知見「{title}」（{id}）を前提に確認します。溶接箇所が増える派生品では、この知見のどこから確認しますか？",
+      annotationWithKnowledge: "登録知見を前提に差分だけ確認",
+      remainingGap:
+        "溶接箇所が増えた場合に、順序と解放条件をどう組み直すかの判断基準は未登録です。",
+      reuse: [
+        {
+          id: "tack",
+          label: "仮付けの配置と隙間",
+          topic: "仮付け",
+          find: ["仮付け"],
+          appliedAs:
+            "仮付けの配置と隙間を、元の製品と同じ項目で記録して比較する。",
+          answerIndex: 1,
+        },
+        {
+          id: "order",
+          label: "溶接順序",
+          topic: "温度管理",
+          find: ["順序"],
+          appliedAs:
+            "熱が偏らない順序の考え方を出発点に、増えた箇所を入れた順序案を試験片で比べる。",
+          answerIndex: 3,
+        },
+        {
+          id: "release",
+          label: "治具解放の条件",
+          topic: "接合",
+          find: ["解放"],
+          appliedAs: "治具を外す時の温度条件を元の製品とそろえて記録する。",
+          answerIndex: 5,
+        },
+      ],
+    },
+  },
+  {
+    id: "molding-c2",
+    label: "形状の量産時の注意点",
+    question: "この形状を量産する際の注意点は？",
+    title:
+      "量産時の反りを、リブ周辺・ゲート位置・冷却回路のバランスから確認する",
+    tags: ["反り", "リブ周辺", "ゲート位置", "冷却回路", "量産設計"],
+    expertId: 3,
+    related: [
+      "リブ周辺の収縮差と反り",
+      "ゲート位置による充填状態の違い",
+      "冷却回路のバランスと変形方向",
+    ],
+    gap: "量産時の反りについて、リブ周辺・ゲート位置・冷却回路のバランスを同じ記録で比較する判断手順が見つかりません。",
+    dialogue: [
+      {
+        speaker: "ai",
+        text: "この形状を量産する際の注意点は？",
+        annotation: "スライドの問いを起点に確認",
+      },
+      {
+        speaker: "expert",
+        text: "冷却時の収縮差による反りに注意します。特にリブ周辺で変形が集中していないか、位置と方向を確認します。",
+        annotation: "デモ用の専門家回答",
+      },
+      {
+        speaker: "ai",
+        text: "反りを抑えるために、ゲート位置はどのように確認しますか？",
+        annotation: "ゲート位置の影響を深掘り",
+      },
+      {
+        speaker: "expert",
+        text: "ゲート位置ごとの充填状態と反りの出方を比較し、変形の位置と方向を設計条件へ対応づけます。",
+        annotation: "デモ用の専門家回答",
+      },
+      {
+        speaker: "ai",
+        text: "冷却回路のバランスは、設計と共有知識へどう反映しますか？",
+        annotation: "冷却と知識共有を深掘り",
+      },
+      {
+        speaker: "expert",
+        text: "冷却回路ごとの状態と反りの位置・方向を対応づけて記録し、ゲート位置の検討結果と合わせて設計へ共有します。",
+        annotation: "デモ用の専門家回答",
+      },
+    ],
+    insight:
+      "量産時は冷却時の収縮差による反りに注意し、リブ周辺の変形を起点に、ゲート位置と冷却回路のバランスを分けて確認する。結果は設計条件と共有知識へ戻す。",
+    recommendations: [
+      {
+        title: "形状：リブ周辺の反りを確認する",
+        body: "反りが集中する位置と方向を確認し、リブ周辺の形状との対応を記録する。",
+      },
+      {
+        title: "金型：ゲート位置の影響を比較する",
+        body: "ゲート位置ごとの充填状態と反りの出方を比較し、設計へ共有する。",
+      },
+      {
+        title: "冷却：回路のバランスを確認する",
+        body: "冷却回路ごとの状態と変形の位置・方向を対応づけ、収縮差の影響を確認する。",
+      },
+    ],
+    conditions:
+      "スライドの流れを再現するデモ用の専門家回答です。原資料にない材質・数値条件は断定せず、対象形状と実際の製造条件に基づいて専門家が確認してください。",
+    followUp: {
+      baseScenarioId: "molding",
+      issue: "量産時の反り",
+      questionWithKnowledge:
+        "この形状を量産する際の注意点は？ 登録済みの知見「{title}」（{id}）にあるリブ周辺の確認を前提に、量産で追加して見るべき点を教えてください。",
+      annotationWithKnowledge: "登録知見を前提に差分だけ確認",
+      remainingGap:
+        "量産時の反りについて、冷却回路のバランスまで含めて同じ記録で比較する判断手順は未登録です。",
+      reuse: [
+        {
+          id: "rib",
+          label: "リブ周辺の肉厚",
+          topic: "リブ周辺",
+          find: ["リブ", "肉厚", "肉だまり"],
+          appliedAs:
+            "リブ根元・交差部の肉厚の偏りを先に確認し、反りが集中する位置と照合する。",
+          answerIndex: 1,
+        },
+        {
+          id: "gate",
+          label: "ゲート位置",
+          topic: "ゲート位置",
+          find: ["ゲート"],
+          appliedAs:
+            "ゲート位置ごとの比較で、ゲートからの圧力の伝わり方と反りの出方を合わせて記録する。",
+          answerIndex: 3,
+        },
+        {
+          id: "cooling",
+          label: "冷却回路のバランス",
+          topic: "冷却回路",
+          find: ["冷却回路"],
+          appliedAs:
+            "冷却回路ごとの状態と反りの位置・方向を対応づけて記録し、設計へ共有する。",
+          answerIndex: 5,
+        },
+        {
+          id: "method",
+          label: "条件をそろえた比較",
+          find: ["一つずつ", "段階的"],
+          appliedAs:
+            "ゲート位置や冷却回路を比べるときも、他の条件をそろえて一つずつ変え、結果を記録する。",
+        },
+      ],
+    },
+  },
+];
+export const allScenarios: Scenario[] = [...scenarios, ...followUpScenarios];
+export function baseScenarioOf(scenario: Scenario): Scenario {
+  const baseId = scenario.followUp?.baseScenarioId ?? scenario.id;
+  return scenarios.find((item) => item.id === baseId) ?? scenarios[0];
+}
+export function followUpOf(scenario: Scenario): Scenario | undefined {
+  const base = baseScenarioOf(scenario);
+  return followUpScenarios.find(
+    (item) => item.followUp?.baseScenarioId === base.id,
+  );
+}
+function matchBaseScenario(q: string): Scenario {
   return /溶接|ひずみ|ステンレス|接合/.test(q)
     ? scenarios[1]
     : /樹脂|成形|ヒケ|金型/.test(q)
       ? scenarios[2]
       : scenarios[0];
 }
+export function matchScenario(q: string): Scenario {
+  if (/量産|収縮差|冷却回路|ゲート位置/.test(q)) return followUpScenarios[2];
+  if (/派生/.test(q)) return followUpOf(matchBaseScenario(q))!;
+  return matchBaseScenario(q);
+}
 export type Knowledge = {
   id: string;
+  /** Scenario the knowledge was registered from. Absent on data saved by older versions. */
+  scenarioId?: ScenarioId;
   title: string;
   summary: string;
   tags: string[];
@@ -284,6 +650,8 @@ export type Knowledge = {
     question: string;
     sourceIds: string[];
     dialogue: Scenario["dialogue"];
+    /** First-cycle knowledge this note was built on (second cycle only). */
+    basedOn?: { id: string; title: string }[];
     review: {
       reviewer: string;
       comment: string;

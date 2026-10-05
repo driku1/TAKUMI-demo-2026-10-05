@@ -3292,3 +3292,47 @@ main {
     flex-shrink: 0;
   }
 }
+
+/* Two-cycle demo and ontology knowledge graph */
+.cycle-two-label {
+  margin-top: 16px;
+}
+.cycle-two-chips button {
+  border-color: #f0d6ae;
+}
+.cycle-state {
+  margin-left: 2px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #f1eef5;
+  color: #7a6a88;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.cycle-state.ready {
+  background: #d97706;
+  color: #fff;
+}
+.full-graph.ontology-page {
+  padding: 0;
+}
+.info-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+}
+.article-cycle {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff6e8;
+  color: #6b3c00;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.article-cycle p {
+  margin: 4px 0 0;
+}
+.graph-card .onto-card .onto-canvas {
+  background: #fbf9fd;
+}

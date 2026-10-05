@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   CheckCircle2,
@@ -12,20 +12,23 @@ import {
   Download,
   Network,
   ExternalLink,
+  RefreshCcw,
 } from "lucide-react";
 import { experts, type Expert, type Knowledge, type Scenario } from "./data";
+import { buildQuestions, recommendExperts } from "./process-model";
 import {
-  buildQuestions,
-  recommendExperts,
-  retrieveKnowledge,
-} from "./process-model";
+  buildMergedKnowledge,
+  canMergeKnowledge,
+  shortId,
+  type RunContext,
+} from "./knowledge-cycle";
 import "./process-workspace.css";
 
 type Message = Scenario["dialogue"][number];
 type Props = {
   query: string;
-  scenario: Scenario;
-  knowledge: Knowledge[];
+  /** Prepared run: resolved scenario, search results and first-cycle reuse. */
+  run: RunContext;
   tick: number;
   running: boolean;
   attachments: string[];
@@ -39,6 +42,11 @@ type Props = {
   onDownload: () => void;
   onMerge: (item: Knowledge) => void;
   onLibrary: () => void;
+  /** Auxiliary ontology shown once the PR is merged. */
+  renderMergeGraph?: (savedId: string) => ReactNode;
+  /** First-cycle runs: prepares the related second-cycle consultation. */
+  onStartFollowUp?: () => void;
+  followUpLabel?: string;
 };
 const stages = [
   { name: "Knowledge Search" },
@@ -50,11 +58,12 @@ const stages = [
 ];
 
 export default function ProcessWorkspace(props: Props) {
-  const { query, scenario, knowledge, tick, running, savedId } = props;
-  const retrieval = useMemo(
-    () => retrieveKnowledge(query, scenario, knowledge),
-    [query, scenario, knowledge],
-  );
+  const { query, run, tick, running, savedId } = props;
+  const { scenario, retrieval } = run;
+  const isFollowUp = Boolean(scenario.followUp);
+  const cycleOneRank = run.registered
+    ? retrieval.results.findIndex((result) => result.item.id === run.registered!.id)
+    : -1;
   const candidates = useMemo(
     () => recommendExperts(scenario, retrieval),
     [scenario, retrieval],
@@ -105,33 +114,53 @@ export default function ProcessWorkspace(props: Props) {
     setReviewComment("");
   };
   const merge = () => {
-    if (!ready || savedId || review !== "approved" || !checked || !validDraft)
+    if (!canMergeKnowledge({ ready, savedId, review, checked, validDraft }))
       return;
     setMergedMessageCount(props.extraMessages.length);
-    props.onMerge({
-      id: draftId,
-      ...draft,
-      tags: scenario.tags,
-      author: expert.name,
-      date: new Intl.DateTimeFormat("ja-JP")
-        .format(new Date())
-        .replaceAll("/", "."),
-      isNew: true,
-      recommendations: scenario.recommendations,
-      provenance: {
+    props.onMerge(
+      buildMergedKnowledge({
+        id: draftId,
+        draft,
+        scenario,
+        expert,
         question: query,
         sourceIds: retrieval.results.map((result) => result.item.id),
-        dialogue: [...scenario.dialogue, ...props.extraMessages],
-        review: {
-          reviewer: expert.name,
-          comment: reviewComment,
-          mergedAt: new Date().toISOString(),
-          simulated: true,
-        },
-      },
-    });
+        extraDialogue: props.extraMessages,
+        reviewComment,
+        basedOn: run.cycleOne,
+      }),
+    );
   };
+  const reuseEvents = isFollowUp
+    ? [
+        {
+          id: "cycle-one",
+          tick: 0,
+          title: run.cycleOne
+            ? "Registered knowledge found"
+            : "No registered knowledge used",
+          body: run.cycleOne
+            ? `第1サイクル知見 ${shortId(run.cycleOne.id)} · 検索${cycleOneRank + 1}位`
+            : run.status === "not-retrieved"
+              ? "登録済みだが検索上位外のため不使用"
+              : "第1サイクルの知見は未登録",
+          step: 0,
+        },
+        ...(run.cycleOne
+          ? [
+              {
+                id: "reuse",
+                tick: 9,
+                title: "Knowledge reused in answer",
+                body: `${run.checks.filter((check) => check.usesKnowledge).length}/${run.checks.length} checks cite ${shortId(run.cycleOne.id)}`,
+                step: 4,
+              },
+            ]
+          : []),
+      ]
+    : [];
   const events = [
+    ...reuseEvents,
     {
       id: "search",
       tick: 0,
@@ -216,6 +245,9 @@ export default function ProcessWorkspace(props: Props) {
       <div className="run-context card">
         <div className="run-context-heading">
           <span className="run-id">RUN · {scenario.id.toUpperCase()}</span>
+          <span className={`cycle-badge ${isFollowUp ? "second" : ""}`}>
+            {isFollowUp ? "第2サイクル · 関連相談" : "第1サイクル"}
+          </span>
           <span className={`run-state ${running ? "working" : ""}`}>
             {savedId
               ? "Merged"
@@ -237,7 +269,10 @@ export default function ProcessWorkspace(props: Props) {
           </p>
         )}
         <div className="run-controls">
-          <span>Scenario: {scenario.label} · Keyword routing</span>
+          <span>
+            Scenario: {scenario.label} · Keyword routing
+            {isFollowUp ? " · 登録知見を参照" : ""}
+          </span>
           <div>
             {!ready && (
               <button
@@ -364,15 +399,43 @@ export default function ProcessWorkspace(props: Props) {
                 retrieval={retrieval}
                 onArticle={props.onArticle}
               />
+              {isFollowUp && (
+                <div
+                  className={`cycle-callout ${run.cycleOne ? "used" : "none"}`}
+                  role="status"
+                >
+                  <RefreshCcw size={16} />
+                  <div>
+                    <strong>
+                      {run.cycleOne
+                        ? `第1サイクルの登録知見が検索でヒット（${cycleOneRank + 1}位）`
+                        : run.status === "not-retrieved"
+                          ? "第1サイクルの登録知見は検索上位に入らず、今回は使用しません"
+                          : "第1サイクルの登録知見は未登録です"}
+                    </strong>
+                    <p>
+                      {run.cycleOne
+                        ? `「${run.cycleOne.title}」ID ${run.cycleOne.id} · ${run.cycleOne.provenance?.review.reviewer ?? run.cycleOne.author}が承認（模擬）`
+                        : "既存ナレッジと今回の対話だけで回答します。登録知見を使ったとは表示しません。"}
+                    </p>
+                  </div>
+                </div>
+              )}
               <h3 className="trace-section-heading">Retrieved knowledge</h3>
               <div className="retrieved-list">
                 {retrieval.results.map((result, index) => (
                   <button
                     key={result.item.id}
+                    className={
+                      result.item.id === run.cycleOne?.id ? "cycle-one-hit" : ""
+                    }
                     onClick={() => props.onArticle(result.item)}
                   >
                     <span className="retrieved-rank">{index + 1}</span>
                     <div>
+                      {result.item.id === run.cycleOne?.id && (
+                        <em className="cycle-one-tag">第1サイクル登録知見</em>
+                      )}
                       <strong>{result.item.title}</strong>
                       <p>{result.item.summary}</p>
                       <small>
@@ -611,6 +674,85 @@ export default function ProcessWorkspace(props: Props) {
           )}
           {activeStep === 4 && (
             <>
+              {isFollowUp && (
+                <section
+                  className={`reuse-panel ${run.cycleOne ? "used" : "none"}`}
+                  aria-label="第1サイクル知見の活用"
+                >
+                  <div className="reuse-heading">
+                    <RefreshCcw size={17} />
+                    <div>
+                      <span>Knowledge reuse · 第1サイクル知見の活用</span>
+                      <strong>
+                        {run.cycleOne
+                          ? `登録知見を${run.checks.filter((check) => check.usesKnowledge).length}件の確認事項に使用`
+                          : "登録知見は使用していません"}
+                      </strong>
+                    </div>
+                  </div>
+                  {run.cycleOne ? (
+                    <button
+                      className="reuse-source"
+                      onClick={() => props.onArticle(run.cycleOne!)}
+                    >
+                      <FileText size={16} />
+                      <span>
+                        <b>{run.cycleOne.title}</b>
+                        <small>
+                          ID {run.cycleOne.id} · {run.cycleOne.author} ·{" "}
+                          {run.cycleOne.date}登録 ·{" "}
+                          {run.cycleOne.provenance?.review.reviewer ??
+                            run.cycleOne.author}
+                          が承認（模擬）
+                        </small>
+                      </span>
+                      <ExternalLink size={14} />
+                    </button>
+                  ) : (
+                    <p className="trace-note">
+                      {run.status === "not-retrieved"
+                        ? "登録済みの第1サイクル知見はありますが、今回の検索上位に入らなかったため回答には使っていません。"
+                        : "第1サイクルで知見を登録していないため、既存ナレッジと今回の対話だけで回答しています。"}
+                    </p>
+                  )}
+                  <h3 className="trace-section-heading">
+                    設計上の確認事項と根拠
+                  </h3>
+                  <ol className="reuse-checks">
+                    {run.checks.map((check) => (
+                      <li
+                        key={check.id}
+                        className={check.usesKnowledge ? "uses" : "new"}
+                      >
+                        <div className="reuse-check-title">
+                          <strong>{check.label}</strong>
+                          <em>
+                            {check.usesKnowledge
+                              ? "登録知見を使用"
+                              : "今回の対話で追加"}
+                          </em>
+                        </div>
+                        <p>{check.appliedAs}</p>
+                        <ul>
+                          {check.sources.map((source, index) => (
+                            <li key={index} className={source.kind}>
+                              <b>
+                                {source.kind === "knowledge"
+                                  ? `登録知見 ${shortId(source.knowledgeId)} · ${source.location}`
+                                  : `${source.label} · ${expert.name}`}
+                              </b>
+                              <q>{source.quote}</q>
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="trace-note">
+                    引用はブラウザに保存された登録知見の本文から取得しています。専門家の回答はデモ用に準備した内容で、AIの生成結果ではありません。
+                  </p>
+                </section>
+              )}
               <div className="answer-summary">
                 <span>Design recommendation</span>
                 <p>{scenario.insight}</p>
@@ -754,6 +896,12 @@ export default function ProcessWorkspace(props: Props) {
                         .map((result) => result.item.id)
                         .join(", ")}
                     </p>
+                    {run.cycleOne && (
+                      <p>
+                        発展元（第1サイクル知見）：{run.cycleOne.title}（
+                        {shortId(run.cycleOne.id)}）。上書きせず、新しいノートとして追加します。
+                      </p>
+                    )}
                     <p>
                       対話：Q1〜A3
                       {(mergedMessageCount ?? props.extraMessages.length) > 0
@@ -862,7 +1010,13 @@ export default function ProcessWorkspace(props: Props) {
                     <button
                       className="primary-button"
                       disabled={
-                        review !== "approved" || !checked || !validDraft
+                        !canMergeKnowledge({
+                          ready,
+                          savedId,
+                          review,
+                          checked,
+                          validDraft,
+                        })
                       }
                       onClick={merge}
                     >
@@ -871,6 +1025,37 @@ export default function ProcessWorkspace(props: Props) {
                     </button>
                   )}
                 </div>
+                {savedId && (
+                  <div className="merge-graph">
+                    <div className="merge-graph-heading">
+                      <Network size={17} />
+                      <div>
+                        <strong>追加された知見と接続先</strong>
+                        <small>
+                          Knowledge Graphと同じデータから作成した補助表示です。接続は自動で行い、接続先を選ぶ操作はありません。
+                        </small>
+                      </div>
+                    </div>
+                    {props.renderMergeGraph?.(savedId)}
+                    {props.onStartFollowUp && (
+                      <div className="next-cycle">
+                        <div>
+                          <strong>第2サイクルで使ってみる</strong>
+                          <small>
+                            関連相談「{props.followUpLabel}」で、今登録した知見が検索・回答に使われるかを確認できます。
+                          </small>
+                        </div>
+                        <button
+                          className="secondary-button"
+                          onClick={props.onStartFollowUp}
+                        >
+                          <RefreshCcw size={15} />
+                          関連相談を準備
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </section>
             </>
           )}
@@ -884,7 +1069,7 @@ function RetrievedGraph({
   retrieval,
   onArticle,
 }: {
-  retrieval: ReturnType<typeof retrieveKnowledge>;
+  retrieval: RunContext["retrieval"];
   onArticle: (item: Knowledge) => void;
 }) {
   const topics = [

@@ -1,4 +1,9 @@
-import { experts, type Knowledge, type Scenario } from "./data.ts";
+import {
+  experts,
+  type Knowledge,
+  type Scenario,
+  type ScenarioId,
+} from "./data.ts";
 
 const expansions = {
   aluminum: [
@@ -11,7 +16,32 @@ const expansions = {
   ],
   welding: ["溶接変形", "仮付け", "接合", "温度管理", "治具設計"],
   molding: ["射出成形", "ヒケ", "保圧", "金型設計", "ゲート設計"],
-};
+  "aluminum-c2": [
+    "薄肉加工",
+    "治具設計",
+    "加工変形",
+    "A6061",
+    "切削加工",
+    "残留応力",
+  ],
+  "welding-c2": [
+    "溶接変形",
+    "仮付け",
+    "治具設計",
+    "ステンレス",
+    "温度管理",
+    "接合",
+  ],
+  "molding-c2": [
+    "反り",
+    "リブ",
+    "ゲート設計",
+    "ゲート",
+    "冷却",
+    "射出成形",
+    "金型設計",
+  ],
+} satisfies Record<ScenarioId, string[]>;
 
 /** Transparent local demo retrieval: ranked lexical matches, not an AI confidence score. */
 export function retrieveKnowledge(
