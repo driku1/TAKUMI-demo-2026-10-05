@@ -769,7 +769,7 @@ export default function App() {
                         </button>
                       </div>
                       <div className="graph-subtitle">
-                        選択中のテーマを中心に、組織・課題・ドキュメント・登録知見のつながりを表示
+                        選択中のテーマを中心に、組織・技術観点・ドキュメント・登録知見のつながりを表示
                       </div>
                       <OntologyGraph
                         variant="card"
@@ -783,8 +783,8 @@ export default function App() {
                           組織・匠
                         </span>
                         <span>
-                          <i className="legend-dot orange" />
-                          課題・観点
+                          <i className="legend-dot purple" />
+                          工程・技術観点
                         </span>
                         <span>
                           <i className="legend-dot green" />
@@ -892,7 +892,7 @@ export default function App() {
                   <Network size={21} />
                   <h3>グラフの関係定義</h3>
                   <p>
-                    組織（部署・チーム・匠）と、製品・ナレッジ（工程領域・対象部品・課題・技術観点・ドキュメント）を分けて表示します。線の名称は「所属」「担当」「執筆」「参照」「適用条件」「回答に使用」などの関係で、タグや語の一致は点線の「タグ一致」「本文で言及」として区別し、因果関係としては扱いません。
+                    組織（部署・チーム・匠）と、製品・ナレッジ（工程領域・対象部品・技術観点・ドキュメント）を分けて表示します。線の名称は「所属」「担当」「執筆」「参照」「適用条件」「回答に使用」などの関係で、タグや語の一致は点線の「タグ一致」「本文で言及」として区別し、因果関係としては扱いません。
                   </p>
                 </div>
                 <div className="card info-card">

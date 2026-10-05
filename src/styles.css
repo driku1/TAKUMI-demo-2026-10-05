@@ -1028,6 +1028,9 @@ main {
 .legend-dot.orange {
   background: #bd41ff;
 }
+.legend-dot.purple {
+  background: #b79be6;
+}
 .legend-dot.blue {
   background: #a39bc7;
 }

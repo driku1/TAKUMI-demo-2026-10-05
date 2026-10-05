@@ -108,7 +108,7 @@ test("候補者ごとの想定グラフは、未登録の想定知見1件と（�
       const expected = projection.edges.filter((item) => item.kind === "expected");
       assert.ok(expected.length >= 2);
       assert.ok(expected.every((item) => item.label.endsWith("（想定）")));
-      assert.ok(expected.some((item) => item.label === "対象課題（想定）"));
+      assert.ok(expected.some((item) => item.label === "対象部品（想定）"));
       assert.ok(expected.some((item) => item.label === "回答者（想定）" && item.target === hypothetical[0].id));
       // Notes linked as 参照候補 are retrieved notes the candidate wrote.
       for (const item of expected.filter((edge) => edge.label === "参照候補（想定）")) {

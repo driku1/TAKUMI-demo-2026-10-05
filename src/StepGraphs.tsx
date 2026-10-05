@@ -89,7 +89,7 @@ export function RetrievalOntology({
             items={[
               { ...stepLineStyles.search, label: "検索語一致（一時表示・保存しない）" },
               { color: "#a3abba", dash: "4 4", label: "タグ一致・本文で言及（登録済みの関係）" },
-              { color: "#8a94a6", label: "構造・包含（対象課題など）" },
+              { color: "#8a94a6", label: "構造・包含（登録済みの関係）" },
             ]}
           />
           <ul>

@@ -42,7 +42,7 @@ type Camera = { scale: number; tx: number; ty: number };
 const layerLabels: Record<OntologyLayer, string> = {
   org: "組織 / 部署 / チーム / 匠",
   process: "工程領域 / 対象部品",
-  issue: "課題 / 技術・観点",
+  issue: "技術・観点",
   document: "ドキュメント（既存ナレッジ）",
   registered: "登録知見（Merge済み）",
 };
@@ -75,7 +75,7 @@ const relationLegend: {
   note: string;
   dash?: string;
 }[] = [
-  { kind: "structure", name: "構造・包含", note: "配下 / 対象部品 / 確認観点 / 対象課題" },
+  { kind: "structure", name: "構造・包含", note: "配下 / 対象部品 / 確認観点" },
   { kind: "organization", name: "所属・担当", note: "所属 / 担当 / 執筆" },
   { kind: "reference", name: "参照・出典", note: "参照（出典ドキュメント） / 発展元" },
   { kind: "approval", name: "承認", note: "承認（Approve review・模擬）" },
@@ -540,7 +540,7 @@ export default function OntologyGraph({
               <LineSample color="#d97706" width={4} dash="1 6" round />
               <div>
                 <b>回答で使用（一時表示）</b>
-                <small>回答が知見を当てた課題・観点。保存されません（④）</small>
+                <small>回答が知見を当てた技術・観点。保存されません（④）</small>
               </div>
             </div>
           </section>

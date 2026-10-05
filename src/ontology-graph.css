@@ -365,13 +365,6 @@
 .onto-node.kind-part .node-type {
   fill: #7a3fc0;
 }
-.onto-node.kind-issue .outer {
-  fill: #fff6ec;
-  stroke: #e9a560;
-}
-.onto-node.kind-issue .node-type {
-  fill: #b25d0e;
-}
 .onto-node.kind-topic .outer {
   fill: #f6efff;
   stroke: #cdb3ef;

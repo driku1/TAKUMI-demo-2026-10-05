@@ -100,7 +100,7 @@ export type OntologyEdge = {
 export type OntologyStage = "before" | "after" | "focus" | "usage";
 
 export const edgeKindLabels: Record<EdgeKind, string> = {
-  structure: "構造・包含（配下・対象部品・確認観点・対象課題）",
+  structure: "構造・包含（配下・対象部品・確認観点）",
   organization: "所属・担当・執筆",
   reference: "参照・出典（参照・発展元）",
   tag: "タグ一致・本文で言及（因果ではない）",
@@ -309,7 +309,7 @@ export const zones = [
   {
     id: "product",
     title: "製品・ナレッジ オントロジー",
-    sub: "Knowledge / Domain / Part / Issue / Topic / Document / 登録知見（Merge済みのみ）",
+    sub: "Knowledge / Domain / Part / Topic / Document / 登録知見（Merge済みのみ）",
     x: 590,
     y: 30,
     width: 1010,
@@ -568,13 +568,11 @@ function buildBase(caseId: BaseScenarioId): {
         h: 50,
         cluster: cluster.id,
         path: `Knowledge → ${cluster.domain}`,
-        desc: `${cluster.domain}の工程領域。担当チーム、対象部品、課題、技術・観点、ドキュメントがつながります。`,
+        desc: `${cluster.domain}の工程領域。担当チーム、対象部品、技術・観点、ドキュメントがつながります。`,
       }),
     );
     edge("root", domainId, "structure", "工程領域");
     edge(`team-${cluster.id}`, domainId, "organization", "担当");
-    const multi = cluster.issues.length > 1;
-    const partX = multi ? cluster.x + 64 : cx - 72;
     nodes.push(
       node({
         id: partId,
@@ -583,9 +581,9 @@ function buildBase(caseId: BaseScenarioId): {
         typeLabel: "対象部品・形状",
         label: cluster.part.label,
         sub: cluster.part.sub,
-        x: partX,
+        x: cx,
         y: 290,
-        w: multi ? 108 : 130,
+        w: 130,
         h: 48,
         cluster: cluster.id,
         path: `Knowledge → ${cluster.domain} → ${cluster.part.label}`,
@@ -593,28 +591,6 @@ function buildBase(caseId: BaseScenarioId): {
       }),
     );
     edge(domainId, partId, "structure", "対象部品");
-    cluster.issues.forEach((issue, index) => {
-      const issueId = `issue-${cluster.id}-${index}`;
-      nodes.push(
-        node({
-          id: issueId,
-          kind: "issue",
-          layer: "issue",
-          typeLabel: "課題",
-          label: issue.label,
-          sub: issue.sub,
-          x: multi ? cluster.x + 182 + index * 118 : cx + 76,
-          y: 290,
-          w: multi ? 108 : 120,
-          h: 48,
-          cluster: cluster.id,
-          path: `Knowledge → ${cluster.domain} → ${issue.label}`,
-          desc: issue.desc,
-        }),
-      );
-      if (index === 0) edge(partId, issueId, "structure", "発生課題");
-      else edge(domainId, issueId, "structure", "課題");
-    });
     const topicSpacing = cluster.topics.length > 3 ? 88 : 96;
     cluster.topics.forEach((topic, index) => {
       const topicId = `topic-${cluster.id}-${topic.label}`;
@@ -635,16 +611,9 @@ function buildBase(caseId: BaseScenarioId): {
         }),
       );
     });
-    cluster.issues.forEach((issue, index) => {
-      for (const topic of issue.topics) {
-        edge(
-          `issue-${cluster.id}-${index}`,
-          `topic-${cluster.id}-${topic}`,
-          "structure",
-          "確認観点",
-        );
-      }
-    });
+    for (const topic of cluster.topics) {
+      edge(partId, `topic-${cluster.id}-${topic.label}`, "structure", "確認観点");
+    }
   }
   const columns = new Map<BaseScenarioId, number>();
   for (const item of ontologyDocuments) {
@@ -689,14 +658,6 @@ function buildBase(caseId: BaseScenarioId): {
         edge(docId, `topic-${cluster.id}-${topic.label}`, "tag", `タグ一致：${tag}`);
       }
     }
-    cluster.issues.forEach((issue, index) => {
-      const tag = item.tags.find((value) =>
-        issue.keywords.some((word) => value.includes(word)),
-      );
-      if (tag) {
-        edge(docId, `issue-${cluster.id}-${index}`, "tag", `タグ一致：${tag}`);
-      }
-    });
   }
   return { nodes, edges };
 }
@@ -813,10 +774,6 @@ export function buildOntology({
     if (edges.some((item) => item.id === id)) return;
     edges.push({ id, source, target, kind, label, phase: "cycle1", ...extra });
   };
-  const issueIds = (label?: string) =>
-    cluster.issues.flatMap((issue, index) =>
-      !label || issue.label === label ? [`issue-${cluster.id}-${index}`] : [],
-    );
   const hiddenSources: string[] = [];
   const knowledgeWidth = Math.min(240, cluster.width - 60);
 
@@ -902,15 +859,9 @@ export function buildOntology({
     const rightX = cluster.x + cluster.width - 10 - pairWidth / 2;
     if (first) {
       addKnowledgeNode(first, "knowledge-1", 790, pair ? leftX : cx, width);
-      for (const issueId of issueIds(cluster.issues[0].label)) {
-        add("knowledge-1", issueId, "structure", "対象課題");
-      }
     }
     if (second) {
       addKnowledgeNode(second, "knowledge-2", 790, pair ? rightX : cx, width);
-      for (const issueId of issueIds(followUp.followUp!.issue)) {
-        add("knowledge-2", issueId, "structure", "対象課題");
-      }
       if (
         first &&
         second.provenance?.basedOn?.some((item) => item.id === first.id)
@@ -940,15 +891,6 @@ export function buildOntology({
     ];
     usedNodeIds.push(...sources);
     const links: { source: string; target: string; label: string }[] = [];
-    // The issue the question was about: the related consultation's issue, or
-    // the theme's first issue when the first consultation was asked again.
-    const asked = allScenarios.find((item) => item.id === usage.scenarioId);
-    const askedIssue = asked?.followUp?.issue ?? cluster.issues[0].label;
-    for (const issue of issueIds(askedIssue)) {
-      for (const source of sources) {
-        links.push({ source, target: issue, label: "今回の質問に使用" });
-      }
-    }
     for (const check of usage.checks) {
       if (!check.topic) continue;
       for (const source of check.sources.map(sourceNode)) {
@@ -1197,7 +1139,7 @@ const LABEL_POSITIONS = [
 ];
 
 /** Relation names that carry the story and should win label space. */
-export const KEY_RELATIONS = ["発展元", "承認（模擬）", "対象課題", "今回の質問に使用", "回答で使用"];
+export const KEY_RELATIONS = ["発展元", "承認（模擬）", "回答で使用"];
 
 /** Label priority shared by the views and tests: lower is placed first. */
 export function labelPriority(
@@ -1299,7 +1241,7 @@ export type OntologyProjection = {
   edges: OntologyEdge[];
   emphasisNodeIds: string[];
   emphasisEdgeIds: string[];
-  /** Short text shown on a node's corner (rank, 想定, 相談の課題). */
+  /** Short text shown on a node's corner (rank, 想定, 参照). */
   badges: Record<string, string>;
   caption: string;
   stats: string;
@@ -1310,15 +1252,9 @@ type Retrieval = ReturnType<typeof retrieveKnowledge>;
 const clusterDefOf = (scenario: Scenario) =>
   clusterDefs.find((item) => item.id === baseScenarioOf(scenario).id)!;
 
-/** Issue node of the question: the related question's issue or the theme's first. */
-function askedIssueId(cluster: ClusterDef, scenario: Scenario) {
-  const label = scenario.followUp?.issue ?? cluster.issues[0].label;
-  const index = Math.max(
-    0,
-    cluster.issues.findIndex((issue) => issue.label === label),
-  );
-  return `issue-${cluster.id}-${index}`;
-}
+/** What the question is about (names the expected note; not a graph node). */
+const askedIssue = (cluster: ClusterDef, scenario: Scenario) =>
+  scenario.followUp?.issue ?? cluster.issues[0].label;
 
 /**
  * Ontology node a search term belongs to: a 技術・観点 whose stem it contains,
@@ -1329,10 +1265,6 @@ export function conceptForTerm(cluster: ClusterDef, term: string): string {
     item.stems.some((stem) => term.includes(stem)),
   );
   if (topic) return `topic-${cluster.id}-${topic.label}`;
-  const issue = cluster.issues.findIndex((item) =>
-    item.keywords.some((word) => term.includes(word) || word.includes(term)),
-  );
-  if (issue >= 0) return `issue-${cluster.id}-${issue}`;
   return `domain-${cluster.id}`;
 }
 
@@ -1368,7 +1300,6 @@ export function retrievalProjection({
   const view = buildOntology({ knowledge, scenario, stage: "after" });
   const cluster = clusterDefOf(scenario);
   const byId = new Map(view.nodes.map((item) => [item.id, item]));
-  const anchorId = askedIssueId(cluster, scenario);
   const hits = retrieval.results.map((result, index) => ({
     result,
     rank: index + 1,
@@ -1406,7 +1337,7 @@ export function retrievalProjection({
       .map((link) => rankOf.get(link.note)!);
     return ranks.length ? ranks.reduce((a, b) => a + b, 0) / ranks.length : 0;
   };
-  const conceptIds = unique([anchorId, ...conceptTerms.keys()])
+  const conceptIds = [...conceptTerms.keys()]
     .filter((id) => byId.has(id))
     .sort((a, b) => barycenter(a) - barycenter(b));
 
@@ -1448,7 +1379,7 @@ export function retrievalProjection({
       y: cy,
       w: conceptWidth,
       h,
-      sub: terms ? `検索語：${terms.join("・")}` : "今回の相談の課題",
+      sub: `検索語：${(terms ?? []).join("・")}`,
     });
   }
 
@@ -1478,7 +1409,7 @@ export function retrievalProjection({
       emphasisEdgeIds.push(id);
     }
   }
-  // Other approved relations between a result and a drawn concept (e.g. 対象課題).
+  // Other approved relations between a result and a drawn concept.
   for (const item of view.edges) {
     if (edges.some((edge) => edge.id === item.id)) continue;
     const crosses =
@@ -1490,7 +1421,6 @@ export function retrievalProjection({
   const badges: Record<string, string> = Object.fromEntries(
     drawn.map((hit) => [hit.nodeId!, `${hit.rank}位 · ${hit.result.score}点`]),
   );
-  if (!conceptTerms.has(anchorId)) badges[anchorId] = "相談の課題";
   const outside = hits
     .filter((hit) => !hit.nodeId)
     .map((hit) => ({ rank: hit.rank, id: hit.result.item.id, title: hit.result.item.title }));
@@ -1561,8 +1491,7 @@ export function expectedKnowledgeProjection({
   const cluster = clusterDefOf(scenario);
   const byId = new Map(view.nodes.map((item) => [item.id, item]));
   const { expert } = candidate;
-  const anchorId = askedIssueId(cluster, scenario);
-  const anchor = byId.get(anchorId)!;
+  const partId = `part-${cluster.id}`;
   const expectedId = `expected-${expert.id}`;
   const nodes: OntologyNode[] = [
     node({
@@ -1570,7 +1499,7 @@ export function expectedKnowledgeProjection({
       kind: "knowledge",
       layer: "registered",
       typeLabel: "想定される知見（未登録）",
-      label: `${anchor.label}の判断基準`,
+      label: `${askedIssue(cluster, scenario)}の判断基準`,
       sub: `${expert.name}へのインタビュー後`,
       x: 0,
       y: 0,
@@ -1625,8 +1554,8 @@ export function expectedKnowledgeProjection({
     label: "回答者（想定）",
   });
 
-  nodes.push({ ...anchor });
-  connect(anchorId, "対象課題（想定）");
+  nodes.push({ ...byId.get(partId)! });
+  connect(partId, "対象部品（想定）");
   // 確認観点: the theme's topics named in the candidate's tags or work, and the
   // concepts of the tags that matched the search.
   const profile = `${expert.tags.join(" ")} ${expert.focus}`;
@@ -1635,7 +1564,7 @@ export function expectedKnowledgeProjection({
       .filter((topic) => topic.stems.some((stem) => profile.includes(stem)))
       .map((topic) => `topic-${cluster.id}-${topic.label}`),
     ...candidate.matched.map((term) => conceptForTerm(cluster, term)),
-  ]).filter((id) => id !== anchorId && byId.has(id));
+  ]).filter((id) => byId.has(id));
   for (const id of concepts) {
     nodes.push({ ...byId.get(id)! });
     const kind = byId.get(id)!.kind;
@@ -1643,9 +1572,7 @@ export function expectedKnowledgeProjection({
       id,
       kind === "topic"
         ? "確認観点（想定）"
-        : kind === "domain"
-          ? "工程領域（想定）"
-          : "関連課題（想定）",
+        : "工程領域（想定）",
     );
   }
   // 参照候補: retrieved notes the candidate wrote (the best-ranked few are drawn).

@@ -31,7 +31,6 @@ const approvedKinds = new Set([
   "root",
   "domain",
   "part",
-  "issue",
   "topic",
   "document",
   "knowledge",
@@ -84,7 +83,7 @@ test("追加後はMergeした知見と自動で増えた関係をNEWとして示
   const labels = view.edges
     .filter((item) => view.newEdgeIds.includes(item.id))
     .map((item) => item.label);
-  for (const label of ["承認（模擬）", "参照", "対象課題"]) assert.ok(labels.includes(label), label);
+  for (const label of ["承認（模擬）", "参照"]) assert.ok(labels.includes(label), label);
   const references = view.edges.filter(
     (item) => item.source === "knowledge-1" && item.label === "参照",
   );
@@ -118,7 +117,6 @@ test("回答の重ね表示（④）は点も線も追加せず、回答の参�
       .map((check) => check.topic!)
       .sort(),
   );
-  assert.ok(view.usedNodeIds.includes("issue-molding-1"), "量産時の反り");
   // The existing note the answer cited is highlighted too.
   assert.ok(view.usedNodeIds.includes("doc-seed-2-7"));
   for (const item of view.overlayEdges) {
@@ -126,10 +124,10 @@ test("回答の重ね表示（④）は点も線も追加せず、回答の参�
     assert.ok(view.usedNodeIds.includes(item.target));
     assert.ok(!view.edges.some((edge) => edge.id === item.id));
   }
-  assert.ok(view.overlayEdges.some((item) => item.label === "今回の質問に使用"));
+  assert.ok(view.overlayEdges.some((item) => item.label === "回答で使用"));
 });
 
-test("同じ相談をもう一度した回答も④で示し、使った知見と相談の課題だけを強調する", () => {
+test("同じ相談をもう一度した回答も④で示し、使った知見だけを強調する", () => {
   const first = consultAndMerge(molding, initialKnowledge);
   const run = prepareRun({ query: molding.question, scenario: molding, knowledge: first.knowledge });
   const usage = buildUsageRecord(run, { runId: "again", question: molding.question })!;
@@ -140,9 +138,8 @@ test("同じ相談をもう一度した回答も④で示し、使った知見�
   assert.deepEqual(view.nodes.map((item) => item.id), after.nodes.map((item) => item.id));
   assert.deepEqual(view.edges.map((item) => item.id), after.edges.map((item) => item.id));
   assert.equal(view.focusNodeId, "knowledge-1");
-  assert.deepEqual(view.usedNodeIds.sort(), ["issue-molding-0", "knowledge-1"]);
+  assert.deepEqual(view.usedNodeIds, ["knowledge-1"]);
   assert.deepEqual(view.overlayEdges, []);
-  assert.ok(view.usedEdgeIds.includes("knowledge-1>issue-molding-0"));
 
   // 関連する質問を先にMergeして、同じ質問をもう一度した場合は knowledge-2 を使う
   const related = consultAndMerge(slide, initialKnowledge);
@@ -151,7 +148,7 @@ test("同じ相談をもう一度した回答も④で示し、使った知見�
   const view2 = buildOntology({ knowledge: related.knowledge, overlay: usage2, scenario: molding, stage: "usage" });
   assert.equal(view2.stage, "usage");
   assert.equal(view2.focusNodeId, "knowledge-2");
-  assert.deepEqual(view2.usedNodeIds.sort(), ["issue-molding-1", "knowledge-2"]);
+  assert.deepEqual(view2.usedNodeIds, ["knowledge-2"]);
 });
 
 test("回答の知見が消えている・別テーマ・回答なしなら④を出さない", () => {
