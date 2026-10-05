@@ -129,9 +129,9 @@ export const stageLabels: Record<
   },
   focus: {
     button: "③ 新知見に注目",
-    title: "新知見に注目｜接続先と詳細",
+    title: "新知見に注目｜追加した知見と接続先",
     description:
-      "全体の位置づけを残したまま、登録知見の接続先と登録内容を表示します。",
+      "追加した知見とその接続先だけを拡大して強調し、ほかは薄く表示します。登録内容と接続先の一覧も表示します。",
   },
   usage: {
     button: "④ 回答での活用",
@@ -997,7 +997,8 @@ export function boundsOf(nodes: OntologyNode[], padding = 40): Box {
 /** Nodes the camera should frame for a stage. */
 export function stageFrameNodes(view: OntologyView, scenario: Scenario) {
   const baseId = scenario.followUp?.baseScenarioId ?? scenario.id;
-  if (view.stage === "before") {
+  // ① and ② show the whole theme; ③ and ④ zoom into the knowledge.
+  if (view.stage === "before" || view.stage === "after") {
     return view.nodes.filter(
       (item) => item.cluster === baseId || item.layer === "org",
     );
@@ -1241,7 +1242,7 @@ export type OntologyProjection = {
   edges: OntologyEdge[];
   emphasisNodeIds: string[];
   emphasisEdgeIds: string[];
-  /** Short text shown on a node's corner (rank, 想定, 参照). */
+  /** Short text shown on a node's corner (想定, 参照). */
   badges: Record<string, string>;
   caption: string;
   stats: string;
@@ -1418,9 +1419,7 @@ export function retrievalProjection({
     if (crosses) edges.push({ ...item, peripheral: false });
   }
 
-  const badges: Record<string, string> = Object.fromEntries(
-    drawn.map((hit) => [hit.nodeId!, `${hit.rank}位 · ${hit.result.score}点`]),
-  );
+  const badges: Record<string, string> = {};
   const outside = hits
     .filter((hit) => !hit.nodeId)
     .map((hit) => ({ rank: hit.rank, id: hit.result.item.id, title: hit.result.item.title }));
@@ -1839,7 +1838,7 @@ export function questionPlanProjection({
     badges: Object.fromEntries(
       hits
         .filter((hit) => used.has(hit.nodeId))
-        .map((hit) => [hit.nodeId, `参照 · 検索${hit.rank}位`]),
+        .map((hit) => [hit.nodeId, "参照"]),
     ),
     caption: "質問の根拠",
     stats: `質問${rows.length}件 · 参照した既存知見${noteIds.length}件（一時表示・保存しない）`,

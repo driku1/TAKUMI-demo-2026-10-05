@@ -112,7 +112,7 @@ export function RetrievalOntology({
             </p>
           )}
           <p className="onto-step-note">
-            右側の知見は検索順位の順で、カードの「一致」は一致した検索語です。カードを選ぶと本文を表示します。
+            右側の知見は一致した語が多い順に上から並べ、カードの「一致」に一致した検索語を表示しています。カードを選ぶと本文を表示します。
             {projection.themeTerms.length > 0 &&
               `工程領域全体の語（${projection.themeTerms.join("・")}）は線にせず、カードの「一致」にだけ表示しています。`}
           </p>
@@ -223,7 +223,7 @@ export function QuestionPlanOntology({
                     <div key={note.id}>
                       <dt>既存知見</dt>
                       <dd>
-                        {note.id}「{note.title}」（検索{note.rank}位）：{note.summary}
+                        {note.id}「{note.title}」：{note.summary}
                       </dd>
                     </div>
                   ))}

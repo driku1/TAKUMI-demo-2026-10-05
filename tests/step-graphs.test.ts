@@ -59,7 +59,7 @@ function snapshot(knowledge: Knowledge[], scenario: Scenario) {
   };
 }
 
-test("検索結果のグラフは検索順位・点数と一致し、承認済みグラフに何も追加しない", () => {
+test("検索結果のグラフは検索結果の順に並び、順位・点数は出さず、承認済みグラフに何も追加しない", () => {
   const { knowledge } = consultAndMerge(molding, initialKnowledge);
   for (const scenario of allQuestions) {
     for (const input of [initialKnowledge, knowledge]) {
@@ -71,10 +71,15 @@ test("検索結果のグラフは検索順位・点数と一致し、承認済�
       assert.ok(projection.nodes.every((item) => approved.has(item.id) && !item.hypothetical));
       const drawn = Object.keys(projection.hitNodeIds);
       assert.equal(drawn.length + projection.outside.length, run.retrieval.results.length);
-      for (const [index, result] of run.retrieval.results.entries()) {
+      assert.deepEqual(projection.badges, {}, "no rank or score badges");
+      const ys = run.retrieval.results
+        .map((result) => projection.hitNodeIds[result.item.id])
+        .filter(Boolean)
+        .map((id) => projection.nodes.find((item) => item.id === id)!.y);
+      assert.deepEqual(ys, [...ys].sort((a, b) => a - b), "top to bottom in search order");
+      for (const result of run.retrieval.results) {
         const nodeId = projection.hitNodeIds[result.item.id];
         if (!nodeId) continue;
-        assert.equal(projection.badges[nodeId], `${index + 1}位 · ${result.score}点`);
         for (const item of projection.edges.filter((edge) => edge.kind === "search" && edge.source === nodeId)) {
           const terms = item.label.replace("検索語一致：", "").split("・");
           assert.ok(terms.every((term) => result.matched.includes(term)), item.label);
@@ -91,7 +96,8 @@ test("同じ相談をもう一度すると、検索結果のグラフで登録�
   const run = prepareRun({ query: molding.question, scenario: molding, knowledge });
   const projection = retrievalProjection({ knowledge, scenario: molding, retrieval: run.retrieval });
   assert.equal(projection.hitNodeIds[item.id], "knowledge-1");
-  assert.match(projection.badges["knowledge-1"], /^1位/);
+  const notes = projection.nodes.filter((entry) => Object.values(projection.hitNodeIds).includes(entry.id));
+  assert.equal(notes.sort((a, b) => a.y - b.y)[0].id, "knowledge-1", "shown at the top");
 });
 
 test("候補者ごとの想定グラフは、未登録の想定知見1件と（想定）の関係だけを一時的に加える", () => {

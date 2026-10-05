@@ -18,6 +18,7 @@ import { experts, type Expert, type Knowledge, type Scenario } from "./data";
 import { buildQuestions, recommendExperts } from "./process-model";
 import {
   answerBasis,
+  answerReason,
   buildMergedKnowledge,
   canMergeKnowledge,
   shortId,
@@ -75,9 +76,6 @@ export default function ProcessWorkspace(props: Props) {
   // no interview and no new Knowledge PR.
   const knowledgeOnly = run.mode === "knowledge-only";
   const basis = answerBasis(run);
-  const cycleOneRank = run.registered
-    ? retrieval.results.findIndex((result) => result.item.id === run.registered!.id)
-    : -1;
   const candidates = useMemo(
     () => recommendExperts(scenario, retrieval),
     [scenario, retrieval],
@@ -158,7 +156,7 @@ export default function ProcessWorkspace(props: Props) {
           id: "registered-knowledge",
           tick: 0,
           title: "Registered knowledge found",
-          body: `登録知見 ${shortId(reused.id)} · 検索${cycleOneRank + 1}位`,
+          body: `登録知見 ${shortId(reused.id)}`,
           step: 0,
         },
         {
@@ -183,7 +181,7 @@ export default function ProcessWorkspace(props: Props) {
       tick: 0,
       title: "Registered knowledge found",
       body: reused
-        ? `登録知見 ${shortId(reused.id)} · 検索${cycleOneRank + 1}位`
+        ? `登録知見 ${shortId(reused.id)}`
         : "",
       step: 0,
     },
@@ -437,7 +435,7 @@ export default function ProcessWorkspace(props: Props) {
                 <dd>{retrieval.expanded.join(" / ")}</dd>
               </dl>
               <p className="trace-note">
-                タグ一致4点・タイトル一致3点・要約一致1点の合計で並べ替え（同点は新しくMergeした知見が先）。AIの確信度ではありません。
+                タグ・タイトル・要約で一致した語が多いものから順に表示しています（同じなら新しくMergeした知見が先）。AIの確信度ではありません。
               </p>
               <h3 className="trace-section-heading">
                 <Network size={16} /> Retrieval graph
@@ -457,7 +455,7 @@ export default function ProcessWorkspace(props: Props) {
                   <RefreshCcw size={16} />
                   <div>
                     <strong>
-                      登録済みの知見が検索でヒット（{cycleOneRank + 1}位）
+                      登録済みの知見が検索でヒット
                     </strong>
                     <p>
                       「{reused.title}」ID {reused.id} ·{" "}
@@ -466,7 +464,7 @@ export default function ProcessWorkspace(props: Props) {
                     </p>
                     {knowledgeOnly && (
                       <p>
-                        {basis}で確認事項をすべて根拠つきで示せるため、専門家の選定・インタビューは行いません。
+                        {answerReason(run)}そのため、専門家の選定・インタビューは行いません。
                       </p>
                     )}
                   </div>
@@ -474,7 +472,7 @@ export default function ProcessWorkspace(props: Props) {
               )}
               <h3 className="trace-section-heading">Retrieved knowledge</h3>
               <div className="retrieved-list">
-                {retrieval.results.map((result, index) => (
+                {retrieval.results.map((result) => (
                   <button
                     key={result.item.id}
                     className={
@@ -482,7 +480,6 @@ export default function ProcessWorkspace(props: Props) {
                     }
                     onClick={() => props.onArticle(result.item)}
                   >
-                    <span className="retrieved-rank">{index + 1}</span>
                     <div>
                       {result.item.id === run.cited?.id && (
                         <em className="cycle-one-tag">登録知見（Merge済み）</em>
@@ -495,7 +492,7 @@ export default function ProcessWorkspace(props: Props) {
                       </small>
                     </div>
                     <span className="retrieval-score">
-                      {result.score}点<ExternalLink size={13} />
+                      <ExternalLink size={13} />
                     </span>
                   </button>
                 ))}
@@ -509,7 +506,7 @@ export default function ProcessWorkspace(props: Props) {
           {activeStep === 1 && knowledgeOnly && (
             <div className="skip-panel">
               <p className="trace-intro">
-                {basis}で、今回の確認事項をすべて根拠つきで示せます。そのため、専門家の選定・質問生成・インタビューと、新しい知見の登録PRは行いません。
+                {answerReason(run)}そのため、専門家の選定・質問生成・インタビューと、新しい知見の登録PRは行いません。
               </p>
               <ul className="skip-coverage">
                 {run.checks.map((check) => (

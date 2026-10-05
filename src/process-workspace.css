@@ -202,15 +202,6 @@
 .retrieved-list > button:hover {
   background: #fcf9ff;
 }
-.retrieved-rank {
-  width: 22px;
-  flex-shrink: 0;
-  font:
-    11px ui-monospace,
-    monospace;
-  color: #8a7c97;
-  padding-top: 3px;
-}
 .retrieved-list > button > div {
   flex: 1;
   min-width: 0;
@@ -928,9 +919,6 @@
   }
   .retrieved-list > button {
     gap: 7px;
-  }
-  .retrieved-rank {
-    width: 14px;
   }
   .retrieval-score {
     display: none;

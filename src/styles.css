@@ -97,37 +97,11 @@ textarea:focus-visible {
   scrollbar-width: thin;
   scrollbar-color: #48404f transparent;
 }
-.brand {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 0 14px;
-}
-.accenture-logo {
-  width: 128px;
-  height: auto;
-  display: block;
-  margin-bottom: 28px;
-}
-.product-wordmark {
-  font-size: 26px;
-  font-weight: 650;
-  letter-spacing: 2.6px;
-  color: white;
-}
-.product-wordmark small {
-  display: block;
-  margin-top: 7px;
-  color: #a9a0b4;
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0.5px;
-}
 .workspace {
   display: flex;
   gap: 10px;
   align-items: center;
-  margin: 25px 8px 30px;
+  margin: 0 8px 30px;
   padding: 14px 10px;
   border: 1px solid #37303e;
   border-radius: 6px;

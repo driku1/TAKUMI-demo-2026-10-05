@@ -961,3 +961,39 @@
     text-align: center;
   }
 }
+
+/* ③: the added note's connections, listed under the graph. */
+.onto-focus {
+  padding: 12px 18px;
+  border: 1px solid #e4d2f7;
+  border-top: 0;
+  background: #faf5ff;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #3b2056;
+}
+.onto-focus ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 2px 18px;
+}
+.onto-focus li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.onto-focus li i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.onto-focus li b {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: #6f6a7b;
+}

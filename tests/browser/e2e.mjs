@@ -63,6 +63,7 @@ try {
   await p.goto(base);
   await p.evaluate(() => localStorage.clear());
   await p.reload();
+  check('Sidebar has no Accenture / TAKUMI lettering', (await p.locator('#workspace-navigation .brand, #workspace-navigation img').count()) === 0 && !/TAKUMI|Accenture/.test(await p.locator('#workspace-navigation').innerText()));
   const homeText = await p.locator('main').innerText();
   check('Home shows no first/second-cycle labels', !/第2サイクル|第1サイクル|関連相談|1回目|2回目/.test(homeText));
   const chips = await p.locator('.sample-chips button').allInnerTexts();
@@ -92,8 +93,10 @@ try {
   await p.locator('.execution-log button', { hasText: 'Knowledge retrieved' }).click();
   await p.waitForTimeout(250);
   const resultCount = await p.locator('.retrieved-list > button').count();
-  const rankBadges = await p.locator('.step-graph .node-badge.search').count();
-  check('S1 Knowledge Search graph: one ranked card per result', rankBadges === resultCount && resultCount > 0, `${rankBadges}/${resultCount}`);
+  const resultCards = await p.locator('.step-graph .onto-node.kind-document, .step-graph .onto-node.kind-knowledge').count();
+  check('S1 Knowledge Search graph: one card per result', resultCards === resultCount && resultCount > 0, `${resultCards}/${resultCount}`);
+  const searchText = `${await p.locator('.retrieved-list').innerText()} ${await p.locator('.step-graph').innerText()}`;
+  check('S1 no rank or score shown', (await p.locator('.step-graph .node-badge').count()) === 0 && !/\d+点|\d+位/.test(searchText) && (await p.locator('.retrieved-rank').count()) === 0);
   check('S1 Knowledge Search graph: no temporary nodes and no overlaps', (await p.locator('.step-graph .onto-node.is-temporary').count()) === 0 && clean(await overlaps('.step-graph')));
   await p.locator('.execution-log button', { hasText: 'Experts matched' }).click();
   await p.waitForTimeout(250);
@@ -146,7 +149,7 @@ try {
   check('E3b same question: retrieved → found → interview skipped → response', ['Knowledge retrieved', 'Registered knowledge found', 'Expert interview skipped', 'Response compiled'].every((t) => repeatLog.includes(t)) && !/Experts matched|Interview started|Knowledge PR created/.test(repeatLog));
   await p.locator('.execution-log button', { hasText: 'Knowledge retrieved' }).click();
   await p.waitForTimeout(250);
-  check('E3b search graph ranks the merged note first', ((await p.locator('.step-graph .onto-node.kind-knowledge .node-badge').textContent()) ?? '').startsWith('1位'));
+  check('E3b search lists the merged note first', (await p.locator('.retrieved-list > button').first().locator('.cycle-one-tag').count()) === 1);
   await p.locator('.execution-log button', { hasText: 'Response compiled' }).click();
   const repeatPanel = await p.locator('.reuse-panel').innerText();
   check('E3b answer cites the merged note as the same consultation', repeatPanel.includes('同じ相談の登録知見') && repeatPanel.includes(k1.id));
@@ -201,6 +204,15 @@ try {
   await p.locator('.onto-page').screenshot({ path: `${out}/e5-stage2.png` });
   await stageBtn('③ 新知見に注目').click(); await p.waitForTimeout(300);
   check('E5 ③ detail shows ID and 適用条件', (await p.locator('.onto-detail').innerText()).includes(k1.id) && (await p.locator('.onto-detail').innerText()).includes('適用条件'));
+  const t3 = await p.locator('.onto-page .onto-canvas > svg > g').getAttribute('transform');
+  check('E5 ③ dims everything but the added note and lists its connections', (await p.locator('.onto-page .onto-node.dim').count()) > 0 && (await p.locator('.onto-focus').innerText()).includes(k1.id));
+  await stageBtn('② 追加後').click(); await p.waitForTimeout(300);
+  const t2 = await p.locator('.onto-page .onto-canvas > svg > g').getAttribute('transform');
+  check('E5 ② differs from ③ (whole theme, nothing dimmed, no focus list)', t2 !== t3 && (await p.locator('.onto-page .onto-node.dim').count()) === 0 && (await p.locator('.onto-focus').count()) === 0);
+  await p.setViewportSize({ width: 1100, height: 800 }); await p.waitForTimeout(300);
+  await stageBtn('③ 新知見に注目').click(); await p.waitForTimeout(300);
+  check('E5 ③ on a narrower screen still highlights the added note', (await p.locator('.onto-detail').count()) === 0 && (await p.locator('.onto-page .onto-node.dim').count()) > 0 && (await p.locator('.onto-focus').count()) === 1);
+  await p.setViewportSize({ width: 1440, height: 900 }); await p.waitForTimeout(200);
   await stageBtn('① 登録前').click(); await p.waitForTimeout(200);
   check('E5 ① hides merged knowledge', (await p.locator('.onto-page .onto-node.kind-knowledge').count()) === 0);
   const snap = await store();

@@ -365,25 +365,6 @@ export default function App() {
         className={`sidebar ${sidebarOpen ? "open" : ""}`}
         inert={dialogOpen}
       >
-        <a
-          className="brand"
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            navigate("home");
-          }}
-        >
-          <img
-            className="accenture-logo"
-            src="/brand/accenture-white.svg"
-            alt="Accenture"
-            width="138"
-            height="36"
-          />
-          <div className="product-wordmark">
-            TAKUMI<small>Manufacturing Intelligence</small>
-          </div>
-        </a>
         <div className="workspace">
           <span className="workspace-icon">
             <Layers size={18} />

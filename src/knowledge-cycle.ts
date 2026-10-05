@@ -484,6 +484,16 @@ export function prepareRun({
   };
 }
 
+/** Why a knowledge-only answer needs no expert, in plain words. */
+export function answerReason(run: RunContext): string {
+  if (run.match === "same") {
+    return "以前に同じ相談をして、承認・登録した知見があります。今回はその知見の内容だけで回答できます。";
+  }
+  return answerBasis(run) === "登録知見と既存ナレッジ"
+    ? "今回確認すべき点は、承認・登録済みの知見と既存のナレッジにすべて書かれているため、その内容だけで回答できます。"
+    : "今回確認すべき点は、承認・登録済みの知見にすべて書かれているため、その内容だけで回答できます。";
+}
+
 /** Words for what a knowledge-only answer is built on. */
 export function answerBasis(run: RunContext): string {
   if (run.match === "same") return "同じ相談の登録知見";

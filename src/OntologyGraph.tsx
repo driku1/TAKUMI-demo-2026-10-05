@@ -320,6 +320,12 @@ export default function OntologyGraph({
   const selectedNeighbours = selectedNode
     ? neighbours(full, selectedNode.id)
     : new Set<string>();
+  // ③ keeps the added note and its connections lit even when its detail
+  // panel does not open (narrow screens), so it never looks like ②.
+  const focusLit =
+    !projection && variant === "page" && view.stage === "focus" && focusNodeId
+      ? focusNodeId
+      : undefined;
   const activeEdges = new Set(
     visibleEdges
       .filter(
@@ -328,17 +334,23 @@ export default function OntologyGraph({
           emphEdges.has(item.id) ||
           (view.stage !== "before" && newEdges.has(item.id)) ||
           (selectedNode &&
-            (item.source === selectedNode.id || item.target === selectedNode.id)),
+            (item.source === selectedNode.id || item.target === selectedNode.id)) ||
+          (!selectedNode &&
+            focusLit !== undefined &&
+            (item.source === focusLit || item.target === focusLit)),
       )
       .map((item) => item.id),
   );
   const dimming =
-    Boolean(selectedNode) || (!projection && view.stage === "usage");
+    Boolean(selectedNode) ||
+    Boolean(focusLit) ||
+    (!projection && view.stage === "usage");
   const litNodes = new Set<string>([
     ...selectedNeighbours,
     ...usedNodes,
     ...(selectedNode ? [] : emphNodes),
-    ...(view.stage === "usage" ? [] : newNodes),
+    ...(view.stage === "usage" || focusLit ? [] : newNodes),
+    ...(focusLit && !selectedNode ? neighbours(full, focusLit) : []),
   ]);
   if (dimming) {
     for (const item of visibleEdges) {
@@ -1017,6 +1029,31 @@ export default function OntologyGraph({
       </div>
       {variant === "page" && (
         <>
+          {focusLit && (
+            <div className="onto-focus" aria-live="polite">
+              <strong>
+                注目している知見：{nodeById.get(focusLit)?.label}
+                {knowledgeOf(nodeById.get(focusLit)) &&
+                  `（ID ${knowledgeOf(nodeById.get(focusLit))!.id}）`}
+              </strong>
+              <ul>
+                {full.edges
+                  .filter((item) => item.source === focusLit || item.target === focusLit)
+                  .map((item) => {
+                    const other = nodeById.get(
+                      item.source === focusLit ? item.target : item.source,
+                    )!;
+                    return (
+                      <li key={item.id}>
+                        <i style={{ background: edgeColors[item.kind] }} />
+                        <b>{item.label}</b>
+                        {other.label}
+                      </li>
+                    );
+                  })}
+              </ul>
+            </div>
+          )}
           {view.usage && (
             <div className="onto-usage" aria-live="polite">
               <strong>今回の回答で使った登録知見（重ね表示・保存しません）</strong>
