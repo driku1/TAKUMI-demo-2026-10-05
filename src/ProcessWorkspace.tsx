@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   CheckCircle2,
@@ -26,8 +26,8 @@ import {
   type RunContext,
 } from "./knowledge-cycle";
 import {
-  ExpectedKnowledgeOntology,
-  QuestionPlanOntology,
+  ExpertMatchingMap,
+  QuestionStoryMap,
   RetrievalOntology,
 } from "./StepGraphs";
 import { skillRuntime } from "./skill-runtime";
@@ -90,13 +90,6 @@ export default function ProcessWorkspace(props: Props) {
   const questions = buildQuestions(scenario);
   const expert = candidates[0].expert;
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-  // Expert Matching: whose expected knowledge graph is shown.
-  const [expectedFor, setExpectedFor] = useState<number | null>(null);
-  const expectedRef = useRef<HTMLElement>(null);
-  const expectedCandidate =
-    candidates.find((candidate) => candidate.expert.id === expectedFor) ??
-    candidates.find((candidate) => candidate.selected) ??
-    candidates[0];
   const [selectedStep, setSelectedStep] = useState(0);
   const [followExecution, setFollowExecution] = useState(true);
   const [followup, setFollowup] = useState("");
@@ -552,109 +545,16 @@ export default function ProcessWorkspace(props: Props) {
                 登録された{experts.length}
                 名の専門領域と取得記事の執筆者を照合し、関連する上位
                 {candidates.length}
-                名を表示しています。対話担当は参照シナリオに対応する1名です。
+                名を候補にしました。ナレッジグラフ全体に候補者の所属と専門を示し、候補者の名前を選ぶと、その人へのインタビューで知見を追加できるところ（想定）を強調します。対話担当は参照シナリオに対応する1名です。
               </p>
-              <div className="candidate-list">
-                {candidates.map((candidate, index) => (
-                  <article
-                    key={candidate.expert.id}
-                    className={candidate.selected ? "chosen" : ""}
-                  >
-                    <div className="candidate-heading">
-                      <span className="candidate-rank">0{index + 1}</span>
-                      <div>
-                        <h3>{candidate.expert.name}</h3>
-                        <small>
-                          {candidate.expert.role} · 経験{candidate.expert.years}
-                          年
-                        </small>
-                      </div>
-                      <span className="output-status">
-                        {candidate.selected ? "Selected" : "Alternative"}
-                      </span>
-                    </div>
-                    <p>{candidate.reason}</p>
-                    <div className="trace-tags">
-                      {candidate.expert.tags.map((tag) => (
-                        <span key={tag}>{tag}</span>
-                      ))}
-                    </div>
-                    {candidate.sources.length > 0 && (
-                      <details>
-                        <summary>
-                          推薦の根拠となった知見（{candidate.sources.length}件）
-                        </summary>
-                        {candidate.sources.map((source) => (
-                          <button
-                            className="source-link"
-                            key={source.item.id}
-                            onClick={() => props.onArticle(source.item)}
-                          >
-                            <FileText size={14} />
-                            {source.item.title}
-                          </button>
-                        ))}
-                      </details>
-                    )}
-                    <div className="candidate-actions">
-                      <button
-                        className="text-button"
-                        onClick={() => props.onExpert(candidate.expert)}
-                      >
-                        View profile <ChevronRight size={14} />
-                      </button>
-                      <button
-                        className="text-button"
-                        aria-pressed={expectedCandidate?.expert.id === candidate.expert.id}
-                        onClick={() => {
-                          setExpectedFor(candidate.expert.id);
-                          expectedRef.current?.scrollIntoView({
-                            behavior: "smooth",
-                            block: "nearest",
-                          });
-                        }}
-                      >
-                        <Network size={14} /> 想定グラフ
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-              {expectedCandidate && (
-                <section
-                  ref={expectedRef}
-                  className="expected-preview"
-                  aria-label="インタビュー後の想定ナレッジグラフ"
-                >
-                  <h3 className="trace-section-heading">
-                    <Network size={16} /> Expected knowledge graph
-                    <small>候補者にインタビューした場合に追加が想定される知見と接続先（想定・保存しません）</small>
-                  </h3>
-                  <div className="expected-tabs" role="tablist" aria-label="候補者">
-                    {candidates.map((candidate, index) => (
-                      <button
-                        key={candidate.expert.id}
-                        role="tab"
-                        aria-selected={candidate.expert.id === expectedCandidate.expert.id}
-                        onClick={() => setExpectedFor(candidate.expert.id)}
-                      >
-                        <span>0{index + 1}</span>
-                        {candidate.expert.name}
-                        {candidate.selected && <em>対話担当</em>}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="step-graph">
-                    <ExpectedKnowledgeOntology
-                      knowledge={props.knowledge}
-                      scenario={scenario}
-                      candidate={expectedCandidate}
-                      onArticle={props.onArticle}
-                      onOpenGraph={props.onOpenGraph}
-                    />
-                  </div>
-                </section>
-              )}
+              <ExpertMatchingMap
+                knowledge={props.knowledge}
+                scenario={scenario}
+                candidates={candidates}
+                onArticle={props.onArticle}
+                onExpert={props.onExpert}
+                onOpenGraph={props.onOpenGraph}
+              />
               <div className="trace-gap">
                 <strong>Interview request</strong>
                 <p>宛先：{expert.name}（模擬）</p>
@@ -672,24 +572,22 @@ export default function ProcessWorkspace(props: Props) {
           {activeStep === 2 && (
             <>
               <p className="trace-intro">
-                検索結果から初回質問を作成し、匠の回答を受け取るごとに追加質問を生成します。生成根拠と質問の狙いを確認できます。
+                検索結果から初回質問を作成し、匠の回答を受け取るごとに追加質問を生成します。ナレッジグラフ全体から、どの知見を取得し、何がまだ分からないと判断して、その質問を作ったかを順にたどれます。
               </p>
               {visibleQuestions.length > 0 && (
                 <>
                   <h3 className="trace-section-heading">
-                    <Network size={16} /> Question rationale graph
-                    <small>どの知見から、何が未確認と判断し、どの質問を作ったか（一時表示）</small>
+                    <Network size={16} /> Question story
+                    <small>ナレッジ全体 → 取得した知見 → まだ分からない点 → 質問（一時表示）</small>
                   </h3>
-                  <div className="step-graph">
-                    <QuestionPlanOntology
-                      knowledge={props.knowledge}
-                      scenario={scenario}
-                      retrieval={retrieval}
-                      questions={visibleQuestions}
-                      onArticle={props.onArticle}
-                      onOpenGraph={props.onOpenGraph}
-                    />
-                  </div>
+                  <QuestionStoryMap
+                    knowledge={props.knowledge}
+                    scenario={scenario}
+                    retrieval={retrieval}
+                    questions={visibleQuestions}
+                    onArticle={props.onArticle}
+                    onOpenGraph={props.onOpenGraph}
+                  />
                 </>
               )}
               <div className="question-cards">

@@ -1,6 +1,6 @@
 interface:
   display_name: "デモ: 匠の選定"
-  short_description: "候補の匠と、インタビュー後の想定グラフを表示"
+  short_description: "候補の匠を選び、知見を追加できるところをグラフで強調"
   default_prompt: "$expert-matching 不足している判断基準を聞ける匠を選んでください。"
 
 policy:

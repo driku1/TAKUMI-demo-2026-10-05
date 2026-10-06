@@ -33,10 +33,11 @@ import {
   type OntologyNode,
   type OntologyProjection,
   type OntologyStage,
+  type Spotlight,
 } from "./ontology";
 import "./ontology-graph.css";
 
-type Variant = "page" | "card" | "inline";
+type Variant = "page" | "card" | "inline" | "embed";
 type Camera = { scale: number; tx: number; ty: number };
 
 const layerLabels: Record<OntologyLayer, string> = {
@@ -47,7 +48,8 @@ const layerLabels: Record<OntologyLayer, string> = {
   registered: "登録知見（Merge済み）",
 };
 const stages: OntologyStage[] = ["before", "after", "focus", "usage"];
-const heights: Record<Variant, number> = { page: 640, card: 300, inline: 430 };
+const heights: Record<Variant, number> = { page: 640, card: 300, inline: 430, embed: 620 };
+const MIN_SCALE = 0.15;
 const edgeColors: Record<EdgeKind, string> = {
   structure: "#8a94a6",
   organization: "#3976f6",
@@ -76,7 +78,7 @@ const relationLegend: {
   dash?: string;
 }[] = [
   { kind: "structure", name: "構造・包含", note: "配下 / 対象部品 / 確認観点" },
-  { kind: "organization", name: "所属・担当", note: "所属 / 担当 / 執筆" },
+  { kind: "organization", name: "所属・担当", note: "所属 / 担当 / 執筆 / 専門（匠の専門分野）" },
   { kind: "reference", name: "参照・出典", note: "参照（出典ドキュメント） / 発展元" },
   { kind: "approval", name: "承認", note: "承認（Approve review・模擬）" },
   {
@@ -128,6 +130,9 @@ export default function OntologyGraph({
   onOpenGraph,
   projection,
   aside,
+  spotlight,
+  caption,
+  onNodeClick,
 }: {
   knowledge: Knowledge[];
   /** Current answer's use of registered knowledge (session only, never saved). */
@@ -143,6 +148,12 @@ export default function OntologyGraph({
   projection?: OntologyProjection;
   /** Inline variant: list shown with the canvas instead of the connection list. */
   aside?: ReactNode;
+  /** Embed variant: emphasis over the whole map, with temporary items under it. */
+  spotlight?: Spotlight;
+  /** Embed variant: text of the floating label. */
+  caption?: string;
+  /** Embed variant: a node was chosen; return true when handled. */
+  onNodeClick?: (node: OntologyNode) => boolean | void;
 }) {
   const uid = useId().replace(/:/g, "");
   const interactive = variant !== "card";
@@ -165,15 +176,20 @@ export default function OntologyGraph({
       projection
         ? { nodes: projection.nodes, edges: projection.edges }
         : {
-            nodes: view.nodes,
-            edges:
-              view.stage === "usage"
+            nodes: spotlight ? [...view.nodes, ...spotlight.extraNodes] : view.nodes,
+            edges: [
+              ...(view.stage === "usage"
                 ? [...view.edges, ...view.overlayEdges]
-                : view.edges,
+                : view.edges),
+              ...(spotlight?.extraEdges ?? []),
+            ],
           },
-    [view, projection],
+    [view, projection, spotlight],
   );
-  const focusNodeId = projection
+  const embed = variant === "embed";
+  // Embed and step views carry their own emphasis instead of the stages'.
+  const stageEmphasis = !projection && !embed;
+  const focusNodeId = projection || embed
     ? undefined
     : (focusKnowledgeId &&
       view.nodes.find(
@@ -192,6 +208,9 @@ export default function OntologyGraph({
   const [largeText, setLargeText] = useState(false);
   const [allLabels, setAllLabels] = useState(false);
   const [camera, setCamera] = useState<Camera>({ scale: 0.6, tx: 0, ty: 0 });
+  // Embed variant: the camera glides when a step or a person changes the frame.
+  const [glide, setGlide] = useState(false);
+  const [framed, setFramed] = useState(0);
   const [size, setSize] = useState({ w: 0, h: heights[variant] });
   const canvasRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -219,22 +238,29 @@ export default function OntologyGraph({
     return () => observer.disconnect();
   }, []);
 
-  const frameKey = `${projection?.key ?? ""}:${scenario.id}:${view.stage}:${focusNodeId}:${size.w}x${size.h}:${view.nodes.length}`;
+  const frameKey = `${projection?.key ?? ""}:${spotlight?.key ?? ""}:${scenario.id}:${view.stage}:${focusNodeId}:${size.w}x${size.h}:${view.nodes.length}`;
   const fitTo = (frame: OntologyNode[], reserveDetail = false) => {
     if (!size.w) return;
-    const box = boundsOf(frame, variant === "card" ? 16 : 34);
-    if (variant === "inline") {
+    const box = boundsOf(frame, variant === "card" ? 16 : variant === "embed" ? 50 : 34);
+    if (variant === "inline" || variant === "embed") {
       // Room for the caption that floats over the top of the canvas.
       box.y -= 36;
       box.h += 36;
     }
     // Keep the framed nodes clear of the detail panel that opens on the right.
-    const width = reserveDetail && size.w > 760 ? size.w - 350 : size.w;
+    const width =
+      reserveDetail && size.w > 760
+        ? size.w - 350
+        : variant === "embed"
+          ? size.w - 54
+          : size.w;
     const scale = clamp(
       Math.min(width / box.w, size.h / box.h),
-      0.28,
-      variant === "page" ? 1.15 : 1.05,
+      MIN_SCALE,
+      variant === "page" ? 1.15 : variant === "embed" ? 0.85 : 1.05,
     );
+    setGlide(variant === "embed");
+    setFramed((value) => value + 1);
     setCamera({
       scale,
       tx: (width - box.w * scale) / 2 - box.x * scale,
@@ -244,6 +270,10 @@ export default function OntologyGraph({
   const frameNodes = () =>
     projection
       ? projection.nodes
+      : spotlight
+        ? spotlight.frameIds.length
+          ? full.nodes.filter((item) => spotlight.frameIds.includes(item.id))
+          : full.nodes
       : variant === "inline" && focusNodeId
         ? egoLayout(full, focusNodeId, view.usedNodeIds).nodes
         : stageFrameNodes(view, scenario);
@@ -257,13 +287,14 @@ export default function OntologyGraph({
     if (!svg || !interactive) return;
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
+      setGlide(false);
       const rect = svg.getBoundingClientRect();
       const px = event.clientX - rect.left;
       const py = event.clientY - rect.top;
       setCamera((current) => {
         const scale = clamp(
           current.scale * (event.deltaY < 0 ? 1.1 : 0.9),
-          0.28,
+          MIN_SCALE,
           2.4,
         );
         const ratio = scale / current.scale;
@@ -278,9 +309,10 @@ export default function OntologyGraph({
     return () => svg.removeEventListener("wheel", onWheel);
   }, [interactive]);
 
-  const zoomBy = (factor: number) =>
+  const zoomBy = (factor: number) => {
+    setGlide(false);
     setCamera((current) => {
-      const scale = clamp(current.scale * factor, 0.28, 2.4);
+      const scale = clamp(current.scale * factor, MIN_SCALE, 2.4);
       const ratio = scale / current.scale;
       const cx = size.w / 2;
       const cy = size.h / 2;
@@ -290,6 +322,7 @@ export default function OntologyGraph({
         ty: cy - (cy - current.ty) * ratio,
       };
     });
+  };
 
   // The inline view re-arranges the same nodes and relations around the note.
   const drawn = projection
@@ -306,14 +339,18 @@ export default function OntologyGraph({
   );
   const nodeById = new Map(drawn.nodes.map((item) => [item.id, item]));
   const selectedNode = selected ? nodeById.get(selected) : undefined;
-  const newNodes = new Set(projection ? [] : view.newNodeIds);
-  const newEdges = new Set(projection ? [] : view.newEdgeIds);
-  const usedNodes = new Set(projection ? [] : view.usedNodeIds);
-  const usedEdges = new Set(projection ? [] : view.usedEdgeIds);
+  const newNodes = new Set(stageEmphasis ? view.newNodeIds : []);
+  const newEdges = new Set(stageEmphasis ? view.newEdgeIds : []);
+  const usedNodes = new Set(stageEmphasis ? view.usedNodeIds : []);
+  const usedEdges = new Set(stageEmphasis ? view.usedEdgeIds : []);
   // A step's own emphasis (search hits, the expected note, question bases).
   const emphNodes = new Set(projection?.emphasisNodeIds ?? []);
   const emphEdges = new Set(projection?.emphasisEdgeIds ?? []);
-  const tone = projection?.tone;
+  // Embed: the spotlight over the whole map (a person, a story step).
+  const spotNodes = new Set(spotlight?.nodeIds ?? []);
+  const spotEdges = new Set(spotlight?.edgeIds ?? []);
+  const spotTargets = new Set(spotlight?.targetIds ?? []);
+  const tone = projection?.tone ?? spotlight?.tone;
 
   // Reference behaviour: the selected node and its relations stay lit, the
   // rest is dimmed. Stage emphasis (NEW / USED) stays lit as well.
@@ -332,6 +369,7 @@ export default function OntologyGraph({
         (item) =>
           usedEdges.has(item.id) ||
           emphEdges.has(item.id) ||
+          spotEdges.has(item.id) ||
           (view.stage !== "before" && newEdges.has(item.id)) ||
           (selectedNode &&
             (item.source === selectedNode.id || item.target === selectedNode.id)) ||
@@ -344,10 +382,13 @@ export default function OntologyGraph({
   const dimming =
     Boolean(selectedNode) ||
     Boolean(focusLit) ||
-    (!projection && view.stage === "usage");
+    spotNodes.size > 0 ||
+    (stageEmphasis && view.stage === "usage");
   const litNodes = new Set<string>([
     ...selectedNeighbours,
     ...usedNodes,
+    ...spotNodes,
+    ...spotTargets,
     ...(selectedNode ? [] : emphNodes),
     ...(view.stage === "usage" || focusLit ? [] : newNodes),
     ...(focusLit && !selectedNode ? neighbours(full, focusLit) : []),
@@ -372,11 +413,16 @@ export default function OntologyGraph({
     activeEdges,
   );
   const priority = (item: OntologyEdge) =>
-    projection ? (emphEdges.has(item.id) ? 0 : 3) : stagePriority(item);
+    projection
+      ? emphEdges.has(item.id) ? 0 : 3
+      : spotEdges.has(item.id)
+        ? item.kind === "expected" || item.kind === "plan" ? 0 : 1
+        : stagePriority(item);
   const labelCandidates = visibleEdges
     .filter((item) => {
       if (projection) return true;
-      if (variant === "card") return activeEdges.has(item.id);
+      // Whole-map views name only the relations they light up.
+      if (variant === "card" || embed) return activeEdges.has(item.id);
       if (allLabels || activeEdges.has(item.id)) return true;
       if (dimming || item.peripheral) return false;
       const a = nodeById.get(item.source)!;
@@ -387,6 +433,7 @@ export default function OntologyGraph({
   // and zooming reuse it.
   const labelKey = [
     projection?.key,
+    spotlight?.key,
     scenario.id,
     view.stage,
     variant,
@@ -399,6 +446,87 @@ export default function OntologyGraph({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [labelKey],
   );
+  // Embed: the band under the map that holds the step's temporary items.
+  const band = (() => {
+    if (!spotlight?.band || !spotlight.extraNodes.length) return null;
+    const box = boundsOf(spotlight.extraNodes, 26);
+    const width = Math.max(box.w, textWidth(spotlight.band, 13) + 44);
+    return { x: box.x - (width - box.w) / 2, y: box.y - 30, w: width, h: box.h + 30 };
+  })();
+  // Embed: names that stay readable however far the camera is zoomed out.
+  const pins = (() => {
+    if (!embed || !spotlight || !size.w) return [];
+    const placed: {
+      id: string;
+      text: string;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      kind: string;
+      /** Node centre, for the leader line of a pin set away from its node. */
+      nx: number;
+      ny: number;
+    }[] = [];
+    const font = 11;
+    const overlaps = (a: { x: number; y: number; w: number; h: number }) =>
+      a.x < 4 ||
+      a.y < 46 || // the floating caption
+      a.x + a.w > size.w - 4 ||
+      a.y + a.h > size.h - 4 ||
+      placed.some(
+        (b) => a.x < b.x + b.w + 3 && b.x < a.x + a.w + 3 && a.y < b.y + b.h + 2 && b.y < a.y + a.h + 2,
+      );
+    const screenBox = (item: OntologyNode) => ({
+      x: (item.x - item.w / 2) * camera.scale + camera.tx,
+      y: (item.y - item.h / 2) * camera.scale + camera.ty,
+      w: item.w * camera.scale,
+      h: item.h * camera.scale,
+    });
+    // Lit nodes stay uncovered where possible.
+    const lit = [...spotNodes, ...spotTargets]
+      .map((id) => nodeById.get(id))
+      .filter((item): item is OntologyNode => Boolean(item))
+      .map((item) => ({ id: item.id, ...screenBox(item) }));
+    const coversLit = (a: { x: number; y: number; w: number; h: number }, own: string) =>
+      lit.some(
+        (b) => b.id !== own && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h,
+      );
+    for (const id of spotlight.pins) {
+      const item = nodeById.get(id);
+      if (!item || !visibleIds.has(id)) continue;
+      // Readable as drawn: no pin needed.
+      if (NODE_FONT.title * (item.fontScale ?? 1) * camera.scale >= 9) continue;
+      const sx = item.x * camera.scale + camera.tx;
+      const sy = item.y * camera.scale + camera.ty;
+      const halfW = (item.w / 2) * camera.scale;
+      const halfH = (item.h / 2) * camera.scale;
+      const text = fitText(spotlight.pinLabels?.[id] ?? item.label, 168, font);
+      const w = textWidth(text, font) + 16;
+      const h = 20;
+      const kind = item.hypothetical ? "temp" : spotTargets.has(id) ? "target" : "plain";
+      const spots = [
+        { x: sx - w / 2, y: sy - halfH - h - 3 },
+        { x: sx - w / 2, y: sy + halfH + 3 },
+        { x: sx + halfW + 4, y: sy - h / 2 },
+        { x: sx - halfW - w - 4, y: sy - h / 2 },
+        // Farther away, with a leader line back to the node.
+        ...[1, 2, 3].flatMap((step) => [
+          { x: sx + halfW + 14, y: sy - h / 2 - step * (h + 3) },
+          { x: sx + halfW + 14, y: sy - h / 2 + step * (h + 3) },
+          { x: sx - halfW - w - 14, y: sy - h / 2 - step * (h + 3) },
+          { x: sx - halfW - w - 14, y: sy - h / 2 + step * (h + 3) },
+        ]),
+        { x: sx - w / 2, y: sy - halfH - 2 * h - 6 },
+        { x: sx - w / 2, y: sy + halfH + h + 6 },
+      ];
+      const spot =
+        spots.find((candidate) => !overlaps({ ...candidate, w, h }) && !coversLit({ ...candidate, w, h }, id)) ??
+        spots.find((candidate) => !overlaps({ ...candidate, w, h }));
+      if (spot) placed.push({ id, text, x: spot.x, y: spot.y, w, h, kind, nx: sx, ny: sy });
+    }
+    return placed;
+  })();
   const counts = countSummary(view);
   const scale = largeText ? 1.2 : 1;
   const nodeCopy = stageLabels[view.stage];
@@ -409,6 +537,11 @@ export default function OntologyGraph({
   };
   const toggle = (id: string) =>
     setSelected((current) => (current === id ? null : id));
+  const choose = (item: OntologyNode, article?: Knowledge) => {
+    if (onNodeClick?.(item)) return;
+    if (article && onArticle) onArticle(article);
+    else toggle(item.id);
+  };
   const knowledgeOf = (item?: OntologyNode) =>
     item?.knowledgeId
       ? knowledge.find((entry) => entry.id === item.knowledgeId)
@@ -583,7 +716,15 @@ export default function OntologyGraph({
               <span>{projection.stats}</span>
             </div>
           )}
-          {variant !== "card" && !projection && (
+          {embed && (
+            <div className="onto-floating" aria-hidden="true">
+              <b>{caption ?? "製造ナレッジ・オントロジー（全体）"}</b>
+              <span>
+                {counts.nodes} NODES · {counts.links} LINKS
+              </span>
+            </div>
+          )}
+          {variant !== "card" && !projection && !embed && (
             <div className="onto-floating" aria-hidden="true">
               <b>{nodeCopy.button}</b>
               <span>
@@ -609,11 +750,17 @@ export default function OntologyGraph({
             aria-label={
               projection
                 ? `${scenario.label}の製造ナレッジ・オントロジー。${projection.caption}。${projection.stats}`
-                : `${scenario.label}の製造ナレッジ・オントロジー。${nodeCopy.title}。${counts.nodes}ノード、${counts.links}リンク`
+                : embed
+                  ? `製造ナレッジ・オントロジー全体。${caption ?? ""}。${counts.nodes}ノード、${counts.links}リンク`
+                  : `${scenario.label}の製造ナレッジ・オントロジー。${nodeCopy.title}。${counts.nodes}ノード、${counts.links}リンク`
             }
             onPointerDown={(event) => {
-              if (!interactive || (event.target as Element).closest(".onto-node"))
+              if (
+                !interactive ||
+                (event.target as Element).closest(".onto-node, .onto-pin")
+              )
                 return;
+              setGlide(false);
               drag.current = {
                 x: event.clientX,
                 y: event.clientY,
@@ -641,7 +788,7 @@ export default function OntologyGraph({
               if (
                 current &&
                 !current.moved &&
-                !(event.target as Element).closest(".onto-node")
+                !(event.target as Element).closest(".onto-node, .onto-pin")
               ) {
                 setSelected(null);
               }
@@ -663,7 +810,18 @@ export default function OntologyGraph({
             </defs>
             <rect width="100%" height="100%" fill={`url(#${uid}-dots)`} />
             <g
-              transform={`translate(${camera.tx.toFixed(1)} ${camera.ty.toFixed(1)}) scale(${camera.scale.toFixed(4)})`}
+              {...(embed
+                ? {
+                    className: "onto-world",
+                    style: {
+                      transform: `translate(${camera.tx.toFixed(1)}px, ${camera.ty.toFixed(1)}px) scale(${camera.scale.toFixed(4)})`,
+                      transformOrigin: "0 0",
+                      transition: glide ? "transform 0.7s ease" : "none",
+                    },
+                  }
+                : {
+                    transform: `translate(${camera.tx.toFixed(1)} ${camera.ty.toFixed(1)}) scale(${camera.scale.toFixed(4)})`,
+                  })}
             >
               {variant !== "inline" && zones.map((zone) => (
                 <g key={zone.id} className={`onto-zone zone-${zone.id}`}>
@@ -694,12 +852,20 @@ export default function OntologyGraph({
                     height={cluster.height}
                     rx="16"
                   />
-                  <text x={cluster.x + 14} y={cluster.y + 20}>
+                  <text x={cluster.x + 14} y={cluster.y + 17}>
                     {cluster.title}
                     {cluster.id === caseCluster ? "（表示中のテーマ）" : ""}
                   </text>
                 </g>
               ))}
+              {band && (
+                <g className={`onto-band tone-${tone}`}>
+                  <rect x={band.x} y={band.y} width={band.w} height={band.h} rx="18" />
+                  <text x={band.x + 16} y={band.y + 22}>
+                    {spotlight?.band}
+                  </text>
+                </g>
+              )}
               {visibleEdges.map((item) => {
                 const a = nodeById.get(item.source)!;
                 const b = nodeById.get(item.target)!;
@@ -713,6 +879,7 @@ export default function OntologyGraph({
                   view.stage !== "before" && newEdges.has(item.id) ? "is-new" : "",
                   usedEdges.has(item.id) ? "is-used" : "",
                   emphEdges.has(item.id) ? `is-emph tone-${tone}` : "",
+                  spotEdges.has(item.id) ? `is-spot tone-${tone}` : "",
                 ].join(" ");
                 return (
                   <path
@@ -731,16 +898,31 @@ export default function OntologyGraph({
                 const isUsed = usedNodes.has(item.id) && item.kind === "knowledge";
                 const isTarget = usedNodes.has(item.id) && item.kind !== "knowledge";
                 const dim = dimming && !litNodes.has(item.id);
-                const article = projection ? knowledgeOf(item) : undefined;
+                const article = projection || embed ? knowledgeOf(item) : undefined;
                 const badge =
                   projection?.badges[item.id] ??
+                  spotlight?.badges[item.id] ??
                   (isUsed ? "USED 今回使用" : isNew ? "NEW" : undefined);
                 const badgeWidth = badge ? textWidth(badge, 10) + 14 : 0;
-                const titleFont = NODE_FONT.title * scale;
-                const subFont = NODE_FONT.sub * scale;
-                const typeFont = NODE_FONT.type * scale;
+                const big = item.fontScale ?? 1;
+                const titleFont = NODE_FONT.title * scale * big;
+                const subFont = NODE_FONT.sub * scale * big;
+                const typeFont = NODE_FONT.type * scale * big;
                 const lines = item.sub ? 2 : 1;
                 const titleY = lines === 2 ? 4 : 8;
+                // Large temporary items: up to three lines between the type and the sub line.
+                const wrapped = wrappedKinds.includes(item.kind)
+                  ? wrapText(item.label, item.w - 16 * big, titleFont, big > 1 ? 3 : 2)
+                  : [];
+                const areaTop = -item.h / 2 + typeFont + 10;
+                const areaBottom = item.h / 2 - (item.sub ? subFont + 12 : 8);
+                const lineGap = titleFont + 3 * big;
+                const firstY =
+                  big > 1
+                    ? areaTop + (areaBottom - areaTop - wrapped.length * lineGap) / 2 + titleFont * 0.88
+                    : wrapped.length === 1
+                      ? 6
+                      : -2;
                 return (
                   <g
                     key={item.id}
@@ -754,6 +936,8 @@ export default function OntologyGraph({
                       isTarget ? "is-used-target" : "",
                       item.hypothetical ? "is-temporary" : "",
                       emphNodes.has(item.id) ? `is-emph tone-${tone}` : "",
+                      spotTargets.has(item.id) ? `is-target tone-${tone}` : "",
+                      spotNodes.has(item.id) && !spotTargets.has(item.id) ? `is-spot tone-${tone}` : "",
                     ].join(" ")}
                     transform={`translate(${item.x} ${item.y})`}
                     role={interactive ? "button" : undefined}
@@ -766,15 +950,13 @@ export default function OntologyGraph({
                     }
                     onClick={() => {
                       if (!interactive) return;
-                      if (article && onArticle) onArticle(article);
-                      else toggle(item.id);
+                      choose(item, article);
                     }}
                     onKeyDown={(event) => {
                       if (!interactive) return;
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        if (article && onArticle) onArticle(article);
-                        else toggle(item.id);
+                        choose(item, article);
                       }
                     }}
                   >
@@ -793,20 +975,38 @@ export default function OntologyGraph({
                             : 5
                       }
                     />
+                    {item.kind !== "topic" &&
+                      (item.kind === "person" ? (
+                        <circle
+                          className="node-icon"
+                          cx={-item.w / 2 + 13 * big}
+                          cy={-item.h / 2 + 1 + typeFont}
+                          r={4.5 * big}
+                        />
+                      ) : (
+                        <rect
+                          className="node-icon"
+                          x={-item.w / 2 + 8 * big}
+                          y={-item.h / 2 + typeFont - 3.5 * big}
+                          width={9 * big}
+                          height={9 * big}
+                          rx={item.kind === "document" || item.kind === "knowledge" ? 2 : 1}
+                        />
+                      ))}
                     <text
                       className="node-type"
-                      x={-item.w / 2 + 9}
+                      x={-item.w / 2 + (item.kind === "topic" ? 9 : 21) * big}
                       y={-item.h / 2 + 4 + typeFont}
                       style={{ fontSize: typeFont }}
                     >
-                      {fitText(item.typeLabel, item.w - 18, typeFont)}
+                      {fitText(item.typeLabel, item.w - (item.kind === "topic" ? 18 : 30) * big, typeFont)}
                     </text>
                     {wrappedKinds.includes(item.kind) ? (
-                      wrapText(item.label, item.w - 16, titleFont).map((line, index, all) => (
+                      wrapped.map((line, index) => (
                         <text
                           key={index}
                           className="node-title"
-                          y={(all.length === 1 ? 6 : -2) + index * (titleFont + 3)}
+                          y={firstY + index * lineGap}
                           style={{ fontSize: titleFont }}
                         >
                           {line}
@@ -826,7 +1026,7 @@ export default function OntologyGraph({
                         className="node-sub"
                         y={
                           wrappedKinds.includes(item.kind)
-                            ? item.h / 2 - 9
+                            ? item.h / 2 - 9 * big
                             : titleY + subFont + 3
                         }
                         style={{ fontSize: subFont }}
@@ -873,6 +1073,37 @@ export default function OntologyGraph({
                 );
               })}
             </g>
+            {pins.length > 0 && (
+              <g
+                key={framed}
+                className={`onto-pins tone-${tone} ${glide ? "after-glide" : ""}`}
+                aria-hidden="true"
+              >
+                {pins.map((pin) => (
+                  <g
+                    key={pin.id}
+                    className={`onto-pin pin-${pin.kind}`}
+                    onClick={() => {
+                      const item = nodeById.get(pin.id);
+                      if (item) choose(item, knowledgeOf(item));
+                    }}
+                  >
+                    <line
+                      className="pin-leader"
+                      x1={Math.min(Math.max(pin.nx, pin.x), pin.x + pin.w)}
+                      y1={Math.min(Math.max(pin.ny, pin.y), pin.y + pin.h)}
+                      x2={pin.nx}
+                      y2={pin.ny}
+                    />
+                    <circle className="pin-dot" cx={pin.nx} cy={pin.ny} r={2.5} />
+                    <rect x={pin.x} y={pin.y} width={pin.w} height={pin.h} rx={pin.h / 2} />
+                    <text x={pin.x + pin.w / 2} y={pin.y + 14}>
+                      {pin.text}
+                    </text>
+                  </g>
+                ))}
+              </g>
+            )}
           </svg>
           {interactive && (
             <div className="onto-zoom">
@@ -902,12 +1133,12 @@ export default function OntologyGraph({
               >
                 <Maximize2 size={13} />
               </button>
-              {variant === "page" && (
+              {(variant === "page" || embed) && (
                 <button
                   type="button"
                   aria-label="全体を表示"
                   title="全体を表示"
-                  onClick={() => fitTo(view.nodes)}
+                  onClick={() => fitTo(embed ? full.nodes : view.nodes)}
                 >
                   ⌂
                 </button>

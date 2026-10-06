@@ -98,34 +98,81 @@ try {
   const searchText = `${await p.locator('.retrieved-list').innerText()} ${await p.locator('.step-graph').innerText()}`;
   check('S1 no rank or score shown', (await p.locator('.step-graph .node-badge').count()) === 0 && !/\d+点|\d+位/.test(searchText) && (await p.locator('.retrieved-rank').count()) === 0);
   check('S1 Knowledge Search graph: no temporary nodes and no overlaps', (await p.locator('.step-graph .onto-node.is-temporary').count()) === 0 && clean(await overlaps('.step-graph')));
+  // Expert Matching: the whole map on the left, the candidates on the right
   await p.locator('.execution-log button', { hasText: 'Experts matched' }).click();
-  await p.waitForTimeout(250);
-  const cardCount = await p.locator('.candidate-list article').count();
-  const tabs = p.locator('.expected-tabs button');
-  check('S2 Expected graph: one tab per candidate', (await tabs.count()) === cardCount && cardCount > 1, `${await tabs.count()}/${cardCount}`);
+  await p.locator('.spot-layout .onto-embed').waitFor();
+  await p.waitForTimeout(900);
+  const spot = '.spot-layout';
+  const picks = p.locator('.candidate-pick');
+  const cardCount = await picks.count();
+  const spotFloating = async () => (await p.locator(`${spot} .onto-floating`).innerText()).replace(/\s+/g, ' ');
+  const spotNodes = () => p.locator(`${spot} .onto-node`).count();
+  const whole = await spotFloating();
+  check('S2 Expert Matching: whole ontology left, candidate panel right', (await p.locator(`${spot} .spot-graph + .spot-panel`).count()) === 1 && whole.includes(`${await spotNodes()} NODES`) && (await spotNodes()) > 100, whole);
+  check('S2 overview: every candidate named on the map, nothing temporary', cardCount > 1 && (await p.locator(`${spot} .onto-pin`).count()) === cardCount && (await p.locator(`${spot} .onto-node.is-temporary`).count()) === 0);
   let everyCandidate = true;
-  const shapes = new Set();
+  const people = new Set();
   for (let i = 0; i < cardCount; i++) {
-    await tabs.nth(i).click();
-    await p.waitForTimeout(150);
-    const temporary = await p.locator('.expected-preview .onto-node.is-temporary').count();
-    const caption = await p.locator('.expected-preview .onto-floating').innerText();
-    shapes.add(await p.locator('.expected-preview .onto-step-list ul').innerText());
-    if (temporary !== 1 || !caption.includes('想定') || !clean(await overlaps('.expected-preview'))) everyCandidate = false;
+    await picks.nth(i).click();
+    await p.waitForTimeout(900);
+    const name = (await picks.nth(i).locator('b').innerText()).trim();
+    const caption = await spotFloating();
+    const personLit = await p.locator(`${spot} .onto-node.is-spot[aria-label$="：${name}"]`).count();
+    const targets = await p.locator(`${spot} .onto-node.is-target`).count();
+    const listed = await p.locator('.candidate-detail .candidate-targets li').count();
+    people.add(name);
+    if (
+      (await p.locator(`${spot} .onto-node.is-temporary`).count()) !== 1 ||
+      !caption.includes(name) || !caption.includes('想定') ||
+      personLit !== 1 || targets < 2 || listed !== targets + 1 ||
+      (await p.locator(`${spot} .onto-node.dim`).count()) === 0 ||
+      !clean(await overlaps(spot))
+    ) everyCandidate = false;
   }
-  check('S2 every candidate: one unregistered expected note, labelled 想定, no overlaps', everyCandidate);
-  check('S2 candidates lead to different expected graphs', shapes.size > 1, `${shapes.size}`);
-  await p.locator('.candidate-list article').nth(1).getByRole('button', { name: /想定グラフ/ }).click();
-  await p.waitForTimeout(150);
-  check('S2 a card button selects that candidate', (await tabs.nth(1).getAttribute('aria-selected')) === 'true');
-  await p.locator('.expected-preview').screenshot({ path: `${out}/s2-expected.png` });
+  check('S2 each name lights that person and where they can add knowledge (one unregistered expected note, no overlaps)', everyCandidate && people.size === cardCount);
+  await picks.first().click();
+  await p.waitForTimeout(900);
+  await p.locator(spot).screenshot({ path: `${out}/s2-expert.png` });
+  await picks.first().click();
+  await p.waitForTimeout(400);
+  check('S2 choosing the same name again returns to the overview', (await p.locator(`${spot} .onto-node.is-temporary`).count()) === 0 && (await p.locator('.candidate-detail').count()) === 0);
+  const second = (await picks.nth(1).locator('b').innerText()).trim();
+  await p.locator(`${spot} .onto-node[aria-label$="：${second}"]`).focus();
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(500);
+  check('S2 choosing a person on the map selects that candidate', (await picks.nth(1).getAttribute('aria-pressed')) === 'true');
+
+  // Question Plan: a story from the whole map to each question
   await p.locator('.execution-log button', { hasText: 'Question plan ready' }).click();
-  await p.waitForTimeout(250);
-  const plan = await p.locator('.plan-rows').innerText();
-  check('S3 Question plan graph: 3 questions, each with what is unknown', (await p.locator('.step-graph .onto-node.kind-question').count()) === 3 && (await p.locator('.plan-rows > li').count()) === 3 && (plan.match(/確認したい点/g) ?? []).length === 3);
-  check('S3 Q1 rests on retrieved note seed-2-7; Q2 on the previous answer', plan.includes('seed-2-7') && plan.includes('冷却時の収縮差による反り'));
-  check('S3 Question plan graph: referenced notes highlighted, no overlaps', (await p.locator('.step-graph .onto-node.is-emph.tone-plan').count()) >= 1 && clean(await overlaps('.step-graph')));
-  await p.locator('.step-graph').screenshot({ path: `${out}/s3-plan.png` });
+  await p.locator('.story-steps').waitFor();
+  const steps = p.locator('.story-steps > li');
+  const current = async () => (await p.locator('.story-steps > li.current > button').innerText()).replace(/^\d+\s*/, '');
+  check('S3 story starts from the whole map (nothing dimmed, nothing temporary)', (await current()).includes('ナレッジ全体') && (await p.locator(`${spot} .onto-node.dim`).count()) === 0 && (await p.locator(`${spot} .onto-node.is-temporary`).count()) === 0 && (await spotNodes()) > 100);
+  check('S3 story: whole → position → retrieved → (known → question) × 3', (await steps.count()) === 9 && (await p.locator('.story-steps > li', { hasText: '生成した質問 Q3' }).count()) === 1);
+  await p.waitForTimeout(4700);
+  check('S3 story plays by itself', (await current()).includes('相談の位置づけ'));
+  await p.locator('.story-controls .story-play').click();
+  const storyText = [];
+  for (let i = 0; i < 9; i++) {
+    await steps.nth(i).locator('button').click();
+    await p.waitForTimeout(150);
+    storyText.push(await p.locator('.story-body').innerText());
+  }
+  check('S3 Q1 rests on retrieved note seed-2-7; Q2 on the previous answer', storyText[3].includes('seed-2-7') && storyText[5].includes('冷却時の収縮差による反り'));
+  await steps.nth(4).locator('button').click();
+  await p.waitForTimeout(900);
+  const q1 = p.locator(`${spot} .onto-node.kind-question`);
+  check('S3 the Q1 step lights the point to confirm and the question', (await q1.count()) === 1 && !(await q1.getAttribute('class')).includes('dim') && (await p.locator(`${spot} .onto-node.kind-gap:not(.dim)`).count()) === 1);
+  await p.locator(spot).screenshot({ path: `${out}/s3-plan-q1.png` });
+  await p.locator('.story-controls button[aria-label="次へ"]').click();
+  await p.waitForTimeout(900);
+  check('S3 next step: A1 → the next point to confirm, earlier items dimmed', (await current()).includes('A1') && (await p.locator(`${spot} .onto-node.kind-answer:not(.dim)`).count()) === 1 && (await p.locator(`${spot} .onto-node.kind-question.dim`).count()) === 0 && (await p.locator(`${spot} .onto-node.kind-question:not(.dim)`).count()) === 1);
+  await steps.nth(8).locator('button').click();
+  await p.waitForTimeout(900);
+  // Q3 and the question its answer replied to (Q2) are lit; Q1 is dimmed.
+  check('S3 last step: three questions drawn, earlier ones dimmed, no overlaps', (await p.locator(`${spot} .onto-node.kind-question`).count()) === 3 && (await p.locator(`${spot} .onto-node.kind-question.dim`).count()) === 1 && clean(await overlaps(spot)));
+  check('S3 question cards stay under the story', (await p.locator('.question-cards article').count()) === 3);
+  await p.locator(spot).screenshot({ path: `${out}/s3-plan-q3.png` });
   check('S4 step graphs leave storage empty', Object.keys(await store()).length === 0);
   await gotoGraph();
   check('E2 graph: ④ unavailable, no knowledge nodes', await stageBtn('④ 回答での活用').isDisabled() && (await p.locator('.onto-page .onto-node.kind-knowledge').count()) === 0);

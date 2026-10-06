@@ -1,6 +1,6 @@
 interface:
   display_name: "デモ: 質問計画"
-  short_description: "既存知見から不足点を整理し、匠への質問を作成"
+  short_description: "既存知見から不足点を整理し、質問に至る流れを表示"
   default_prompt: "$interview-plan 既存の知見で足りない点を整理して、匠への質問を作ってください。"
 
 policy:

@@ -31,8 +31,9 @@ import { buildQuestions, recommendExperts } from "../src/process-model.ts";
 import {
   buildOntology,
   countSummary,
-  expectedKnowledgeProjection,
+  expertSpotlight,
   questionPlanProjection,
+  questionStory,
 } from "../src/ontology.ts";
 import {
   logEvent,
@@ -405,8 +406,9 @@ export async function runSkill(
     const run = runFor(consultation!, stored);
     const candidates = recommendExperts(run.scenario, run.retrieval);
     const knowledge = mergeKnowledge(stored.filter((item) => consultation!.knowledgeIds.includes(item.id)));
+    const view = buildOntology({ knowledge, scenario: run.scenario, stage: "after" });
     const expected = candidates.map((candidate) =>
-      expectedKnowledgeProjection({ knowledge, scenario: run.scenario, candidate }),
+      expertSpotlight({ view, scenario: run.scenario, candidate }),
     );
     const chosen = candidates.find((candidate) => candidate.selected)!;
     const artifact = await writeArtifact(
@@ -423,7 +425,8 @@ ${candidates
 
 - 役割：${candidate.expert.role}（経験${candidate.expert.years}年）
 - 推薦理由：${candidate.reason}
-- インタビュー後に想定される知見の接続（想定・未登録）：${expected[index].connections.map((item) => `${item.label}→${item.target}`).join(" / ")}`,
+- 専門（ナレッジグラフ上の観点）：${expected[index].specialties.map((item) => `${item.label}（${item.domain}）`).join("・") || "なし"}
+- インタビューで知見を追加できるところ（想定・未登録）：${expected[index].targets.map((item) => `${item.typeLabel}「${item.label}」`).join(" / ")} → 想定される知見「${expected[index].extraNodes[0].label}」`,
   )
   .join("\n\n")}
 `,
@@ -441,11 +444,11 @@ ${candidates
             selected: candidate.selected,
             matched: candidate.matched,
             ownNotes: candidate.sources.length,
-            expectedConnections: expected[index].connections.length,
+            canAddTo: expected[index].targets.map((item) => `${item.typeLabel}：${item.label}`),
           })),
         },
-        message: `専門領域と検索結果の執筆者を照合し、候補${candidates.length}名を選びました。対話担当は${chosen.expert.name}（${chosen.expert.role}）です。候補者ごとに、インタビューした場合に追加が想定される知見と接続先（想定グラフ・未登録）を表示しました。`,
-        screen: "Expert Matching（候補者と推薦理由、Expected knowledge graph）",
+        message: `専門領域と検索結果の執筆者を照合し、候補${candidates.length}名を選びました。対話担当は${chosen.expert.name}（${chosen.expert.role}）です。ナレッジグラフ全体に候補者の所属と専門を表示しました。候補者の名前を選ぶと、その人へのインタビューで知見を追加できるところ（想定・未登録）を強調します。`,
+        screen: "Expert Matching（左：ナレッジグラフ全体、右：候補者。名前を選ぶと、知見を追加できるところを強調）",
         next: "$interview-plan で、既存の知見から不足点を整理して質問を作ります。",
       },
       advance("experts"),
@@ -459,6 +462,7 @@ ${candidates
     const knowledge = mergeKnowledge(stored.filter((item) => consultation!.knowledgeIds.includes(item.id)));
     const questions = buildQuestions(run.scenario).filter((item) => item.availableAt <= stageTick.plan);
     const plan = questionPlanProjection({ knowledge, scenario: run.scenario, retrieval: run.retrieval, questions });
+    const story = questionStory({ knowledge, scenario: run.scenario, retrieval: run.retrieval, questions });
     const rows = plan.rows.map((row) => ({
       question: `${row.question.id}：${row.question.text}`,
       knownFrom: row.notes.map((note) => `${note.id}「${note.title}」`),
@@ -472,6 +476,10 @@ ${candidates
       `# ${consultation!.id} 質問計画
 
 既存知見 → 確認したい点 → 生成した質問（一時的な計画で、新しい知見としては登録しません）。
+
+## 質問に至った流れ（画面ではナレッジグラフ全体から順に再生）
+
+${story.map((step, index) => `${index + 1}. ${step.title}：${step.text}`).join("\n")}
 
 ${plan.rows
   .map(
@@ -492,11 +500,11 @@ Q2以降は、インタビュー中に匠の回答を受けて生成します。
         consultationId: consultation!.id,
         mode: consultation!.mode,
         artifacts: [artifact],
-        details: { questions: rows },
+        details: { questions: rows, story: story.map((step) => step.title) },
         message: `取得した知見を確認し、まだ分からない点を整理して最初の質問を作りました。${rows
           .map((row) => `既存知見 ${row.knownFrom.join("・")} → 確認したい点「${row.unknown}」 → ${row.question}`)
           .join(" ")} 追加の質問は、インタビュー中に匠の回答を受けて作ります。`,
-        screen: "Question Plan（質問カードと Question rationale graph）",
+        screen: "Question Plan（ナレッジグラフ全体 → 取得した知見 → まだ分からない点 → 質問の流れを自動再生。質問カード）",
         next: "$expert-interview で、匠へのインタビューを始めます。",
       },
       advance("plan"),

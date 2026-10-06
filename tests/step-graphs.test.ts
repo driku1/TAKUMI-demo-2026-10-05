@@ -10,10 +10,13 @@ import {
 } from "../src/data.ts";
 import { prepareRun } from "../src/knowledge-cycle.ts";
 import {
+  WORLD,
   buildOntology,
-  expectedKnowledgeProjection,
+  candidateOverview,
+  expertSpotlight,
   placeEdgeLabels,
   questionPlanProjection,
+  questionStory,
   retrievalProjection,
   type OntologyNode,
   type OntologyProjection,
@@ -100,33 +103,129 @@ test("同じ相談をもう一度すると、検索結果のグラフで登録�
   assert.equal(notes.sort((a, b) => a.y - b.y)[0].id, "knowledge-1", "shown at the top");
 });
 
-test("候補者ごとの想定グラフは、未登録の想定知見1件と（想定）の関係だけを一時的に加える", () => {
+test("匠の選定：全体のグラフ上で、選んだ匠の所属・専門と、知見を追加できるところ（想定）だけを強調する", () => {
   for (const scenario of allQuestions) {
     const run = prepareRun({ query: scenario.question, scenario, knowledge: initialKnowledge });
     const candidates = recommendExperts(run.scenario, run.retrieval);
-    assert.ok(candidates.length > 1);
     const before = snapshot(initialKnowledge, scenario);
-    const shapes = new Set<string>();
+    const view = buildOntology({ knowledge: initialKnowledge, scenario: run.scenario, stage: "after" });
+    const ids = new Set(view.nodes.map((item) => item.id));
+    const edgeIds = new Set(view.edges.map((item) => item.id));
+    const retrieved = new Set(run.retrieval.results.map((result) => result.item.id));
+
+    const overview = candidateOverview({ view, scenario: run.scenario, candidates });
+    assert.equal(overview.pins.length, candidates.length, "every candidate is named");
+    assert.deepEqual(
+      overview.pins.map((id) => overview.pinLabels![id]),
+      candidates.map((candidate, index) => `0${index + 1} ${candidate.expert.name}`),
+    );
+    assert.deepEqual(overview.frameIds, [], "the whole map");
+
+    const people = new Set<string>();
     for (const candidate of candidates) {
-      const projection = expectedKnowledgeProjection({ knowledge: initialKnowledge, scenario: run.scenario, candidate });
-      const hypothetical = projection.nodes.filter((item) => item.hypothetical);
-      assert.deepEqual(hypothetical.map((item) => item.id), [`expected-${candidate.expert.id}`]);
-      const expected = projection.edges.filter((item) => item.kind === "expected");
-      assert.ok(expected.length >= 2);
-      assert.ok(expected.every((item) => item.label.endsWith("（想定）")));
-      assert.ok(expected.some((item) => item.label === "対象部品（想定）"));
-      assert.ok(expected.some((item) => item.label === "回答者（想定）" && item.target === hypothetical[0].id));
-      // Notes linked as 参照候補 are retrieved notes the candidate wrote.
-      for (const item of expected.filter((edge) => edge.label === "参照候補（想定）")) {
-        const note = projection.nodes.find((entry) => entry.id === item.target)!;
-        assert.ok(candidate.sources.some((source) => source.item.id === note.knowledgeId));
+      const spot = expertSpotlight({ view, scenario: run.scenario, candidate });
+      people.add(spot.personId);
+      assert.ok(ids.has(spot.personId), candidate.expert.name);
+      assert.ok(spot.nodeIds.includes(spot.personId));
+      // Only one temporary note, under the map, never overlapping it.
+      assert.deepEqual(spot.extraNodes.map((item) => item.id), [`expected-${candidate.expert.id}`]);
+      const [expected] = spot.extraNodes;
+      assert.ok(expected.hypothetical && expected.y - expected.h / 2 > WORLD.height);
+      assert.ok(view.nodes.every((item) => !overlap(item, expected)));
+      // Temporary relations are 想定 only; lit relations exist on the map or are temporary.
+      assert.ok(spot.extraEdges.every((item) => item.kind === "expected" && item.label.endsWith("（想定）")));
+      assert.ok(spot.extraEdges.some((item) => item.source === spot.personId && item.label === "回答者（想定）"));
+      const extraIds = new Set(spot.extraEdges.map((item) => item.id));
+      assert.ok(spot.edgeIds.every((id) => edgeIds.has(id) || extraIds.has(id)));
+      assert.ok(spot.nodeIds.every((id) => ids.has(id) || id === expected.id));
+      // Where knowledge can be added: the theme's part and topics, all lit and connected.
+      const cluster = run.scenario.followUp?.baseScenarioId ?? run.scenario.id;
+      assert.ok(spot.targets.some((target) => target.id === `part-${cluster}`));
+      for (const target of spot.targets) {
+        assert.ok(ids.has(target.id) && spot.targetIds.includes(target.id));
+        assert.equal(view.nodes.find((item) => item.id === target.id)!.cluster, cluster);
+        assert.ok(spot.extraEdges.some((item) => item.source === expected.id && item.target === target.id));
       }
-      assert.equal(projection.connections.length, expected.length);
-      shapes.add(expected.map((item) => item.target).sort().join(","));
-      assertReadable(projection, `expected ${scenario.id} ${candidate.expert.name}`);
+      // Lit 執筆 relations lead only to notes this consultation retrieved.
+      for (const id of spot.edgeIds.filter((edge) => edgeIds.has(edge))) {
+        const edge = view.edges.find((item) => item.id === id)!;
+        if (edge.label !== "執筆") continue;
+        const note = view.nodes.find((item) => item.id === edge.target)!;
+        assert.ok(retrieved.has(note.knowledgeId!), note.id);
+      }
+      // The panel lists every retrieved note the person wrote, retrieved ones first.
+      const drawn = candidate.sources.filter((source) =>
+        view.nodes.some((item) => item.kind === "document" && item.knowledgeId === source.item.id),
+      );
+      assert.ok(drawn.length > 0 || candidate.sources.length === 0);
+      for (const source of drawn) {
+        assert.ok(spot.notes.some((note) => note.id === source.item.id && note.retrieved), source.item.id);
+      }
+      assert.deepEqual(spot.notes.map((note) => note.retrieved), [...spot.notes.map((note) => note.retrieved)].sort((a, b) => Number(b) - Number(a)));
+      assert.ok(spot.pins.includes(spot.personId) && spot.pins.includes(expected.id));
     }
-    assert.ok(shapes.size > 1, `${scenario.id}: candidates differ`);
-    assert.deepEqual(snapshot(initialKnowledge, scenario), before);
+    assert.equal(people.size, candidates.length, "each candidate is a different person");
+    assert.deepEqual(snapshot(initialKnowledge, scenario), before, "the ontology is unchanged");
+  }
+});
+
+test("質問計画のストーリー：全体のグラフから始まり、取得した知見 → まだ分からない点 → 質問の順にたどる", () => {
+  for (const scenario of allQuestions) {
+    const run = prepareRun({ query: scenario.question, scenario, knowledge: initialKnowledge });
+    const questions = buildQuestions(run.scenario);
+    const before = snapshot(initialKnowledge, scenario);
+    const view = buildOntology({ knowledge: initialKnowledge, scenario: run.scenario, stage: "after" });
+    const ids = new Set(view.nodes.map((item) => item.id));
+    const edgeIds = new Set(view.edges.map((item) => item.id));
+    for (const count of [1, questions.length]) {
+      const shown = questions.slice(0, count);
+      const steps = questionStory({
+        knowledge: initialKnowledge,
+        scenario: run.scenario,
+        retrieval: run.retrieval,
+        questions: shown,
+      });
+      assert.deepEqual(
+        steps.map((step) => step.id),
+        ["whole", "position", "found", ...shown.flatMap((question) => [`known-${question.id}`, `question-${question.id}`])],
+      );
+      const [whole, , found] = steps;
+      assert.deepEqual([whole.spotlight.nodeIds, whole.spotlight.frameIds], [[], []], "starts from the whole map");
+      // The search step lights the retrieved notes drawn on the map.
+      for (const id of found.spotlight.targetIds) {
+        const note = view.nodes.find((item) => item.id === id)!;
+        assert.ok(run.retrieval.results.some((result) => result.item.id === note.knowledgeId), id);
+        assert.equal(found.spotlight.badges[id], "取得");
+      }
+      assert.ok(found.spotlight.targetIds.length > 0);
+      for (const step of steps) {
+        const extraIds = new Set(step.spotlight.extraNodes.map((item) => item.id));
+        const extraEdgeIds = new Set(step.spotlight.extraEdges.map((item) => item.id));
+        assert.ok(step.spotlight.nodeIds.every((id) => ids.has(id) || extraIds.has(id)), `${step.id} nodes`);
+        assert.ok(step.spotlight.edgeIds.every((id) => edgeIds.has(id) || extraEdgeIds.has(id)), `${step.id} edges`);
+        assert.ok(step.spotlight.extraNodes.every((item) => item.hypothetical && item.y - item.h / 2 > WORLD.height));
+        assert.ok(step.spotlight.extraEdges.every((item) => item.kind === "plan"));
+        for (const [i, a] of step.spotlight.extraNodes.entries()) {
+          for (const b of step.spotlight.extraNodes.slice(i + 1)) assert.ok(!overlap(a, b), `${step.id}: ${a.id} x ${b.id}`);
+        }
+        assert.ok(step.text.length > 0);
+      }
+      // Each question: the point to confirm and the question are lit in its own step.
+      for (const [index, question] of shown.entries()) {
+        const asked = steps.find((step) => step.id === `question-${question.id}`)!;
+        assert.ok(asked.spotlight.nodeIds.includes(`gap-${question.id}`));
+        assert.ok(asked.spotlight.nodeIds.includes(`question-${question.id}`));
+        assert.ok(asked.spotlight.edgeIds.includes(`plan:gap-${question.id}>question-${question.id}`));
+        assert.ok(asked.evidence.some((line) => line.includes(question.text)));
+        if (index > 0) {
+          // The previous question → the expert's answer → the next point to confirm.
+          const known = steps.find((step) => step.id === `known-${question.id}`)!;
+          assert.ok(known.spotlight.edgeIds.includes(`plan:question-${shown[index - 1].id}>answer-${question.id}`));
+          assert.ok(known.spotlight.edgeIds.includes(`plan:answer-${question.id}>gap-${question.id}`));
+        }
+      }
+    }
+    assert.deepEqual(snapshot(initialKnowledge, scenario), before, "the ontology is unchanged");
   }
 });
 

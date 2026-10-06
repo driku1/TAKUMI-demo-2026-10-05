@@ -997,3 +997,168 @@
   font-size: 10.5px;
   color: #6f6a7b;
 }
+
+/* Type icons on the cards (as in the reference ontology) */
+.node-icon {
+  fill: #b9b2c6;
+}
+.onto-node.kind-company .node-icon,
+.onto-node.kind-division .node-icon,
+.onto-node.kind-department .node-icon,
+.onto-node.kind-team .node-icon,
+.onto-node.kind-person .node-icon {
+  fill: #3976f6;
+}
+.onto-node.kind-root .node-icon,
+.onto-node.kind-domain .node-icon,
+.onto-node.kind-part .node-icon {
+  fill: #a46ee0;
+}
+.onto-node.kind-document .node-icon {
+  fill: #6a4fa8;
+}
+.onto-node.kind-knowledge .node-icon {
+  fill: #a100ff;
+}
+.onto-node.kind-gap .node-icon,
+.onto-node.kind-question .node-icon {
+  fill: #be185d;
+}
+.onto-node.kind-answer .node-icon {
+  fill: #9a93a8;
+}
+
+/* Embed: the whole map with a spotlight (Expert Matching, Question Plan) */
+.onto-embed .onto-canvas {
+  border: 0;
+}
+.onto-embed .onto-node .outer {
+  filter: none;
+}
+.onto-embed .onto-edge.active {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1.7;
+}
+.onto-embed .onto-edge.active.kind-expected,
+.onto-embed .onto-edge.active.kind-plan {
+  stroke-width: 2.6;
+}
+.onto-node.is-spot.tone-expected .outer {
+  stroke: var(--onto-expected) !important;
+  stroke-width: 2.6 !important;
+}
+.onto-node.is-spot.tone-plan .outer {
+  stroke: var(--onto-plan) !important;
+  stroke-width: 2.6 !important;
+}
+.onto-node.is-target .outer {
+  stroke-width: 4 !important;
+}
+.onto-node.is-target.tone-expected .outer {
+  fill: #f5f3ff;
+  stroke: var(--onto-expected) !important;
+  filter: drop-shadow(0 0 10px rgba(124, 58, 237, 0.45)) !important;
+}
+.onto-node.is-target.tone-plan .outer {
+  fill: #fdf2f8;
+  stroke: var(--onto-plan) !important;
+  filter: drop-shadow(0 0 10px rgba(190, 24, 93, 0.4)) !important;
+}
+.onto-band rect {
+  fill: rgba(255, 255, 255, 0.7);
+  stroke-width: 2;
+  stroke-dasharray: 10 7;
+}
+.onto-band.tone-expected rect {
+  stroke: var(--onto-expected);
+}
+.onto-band.tone-plan rect {
+  stroke: var(--onto-plan);
+}
+.onto-band text {
+  font-size: 13px;
+  font-weight: 750;
+}
+.onto-band.tone-expected text {
+  fill: #5b21b6;
+}
+.onto-band.tone-plan text {
+  fill: #9d174d;
+}
+.onto-pin {
+  cursor: pointer;
+}
+.onto-pin rect {
+  fill: rgba(255, 255, 255, 0.96);
+  stroke: #b9b2c6;
+  stroke-width: 1;
+  filter: drop-shadow(0 2px 4px rgba(40, 30, 70, 0.16));
+}
+.onto-pin text {
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+  fill: #2c2638;
+}
+.onto-pins.tone-expected .pin-target rect,
+.onto-pins.tone-expected .pin-temp rect {
+  stroke: var(--onto-expected);
+  stroke-width: 1.6;
+}
+.onto-pins.tone-plan .pin-target rect,
+.onto-pins.tone-plan .pin-temp rect {
+  stroke: var(--onto-plan);
+  stroke-width: 1.6;
+}
+.onto-pins.tone-expected .pin-target rect {
+  fill: #f5f3ff;
+}
+.onto-pins.tone-plan .pin-target rect {
+  fill: #fdf2f8;
+}
+.onto-pin.pin-temp rect {
+  stroke-dasharray: 4 3;
+}
+.onto-pins.after-glide {
+  animation: onto-pin-in 0.3s ease 0.6s both;
+}
+@keyframes onto-pin-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .onto-world {
+    transition: none !important;
+  }
+  .onto-pins.after-glide {
+    animation: none;
+  }
+}
+.onto-pin .pin-leader {
+  stroke: #8f86a0;
+  stroke-width: 1;
+}
+.onto-pin .pin-dot {
+  fill: #5b5468;
+}
+.onto-pins.tone-expected .pin-dot {
+  fill: var(--onto-expected);
+}
+.onto-pins.tone-plan .pin-dot {
+  fill: var(--onto-plan);
+}
+.onto-embed .onto-floating {
+  max-width: calc(100% - 20px);
+}
+.onto-embed .onto-floating b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.onto-embed .onto-floating span {
+  flex: none;
+}

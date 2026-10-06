@@ -59,16 +59,22 @@ try {
   // 3. expert-matching
   const matching = skill('expert-matching');
   check('expert-matching: candidates and expected graphs', matching.status === 'success' && matching.details.candidates.length === 5);
-  await p.locator('.expected-preview').waitFor({ timeout: 8000 });
-  check('expert-matching: screen shows candidates and the expected graph', (await p.locator('.candidate-list article').count()) === 5 && (await hint()).includes('$interview-plan'));
-  await p.locator('.expected-preview').screenshot({ path: `${out}/k2-expert-matching.png` });
+  await p.locator('.spot-layout .onto-embed').waitFor({ timeout: 8000 });
+  check('expert-matching: screen shows the whole ontology and the five candidates', (await p.locator('.candidate-pick').count()) === 5 && (await p.locator('.spot-layout .onto-pin').count()) === 5 && (await hint()).includes('$interview-plan'));
+  await p.locator('.candidate-pick').first().click();
+  await p.waitForTimeout(1000);
+  check('expert-matching: the presenter picks a name and the map lights where they can add knowledge', (await p.locator('.spot-layout .onto-node.is-temporary').count()) === 1 && (await p.locator('.spot-layout .onto-node.is-target').count()) >= 2);
+  await p.locator('.spot-layout').screenshot({ path: `${out}/k2-expert-matching.png` });
 
   // 4. interview-plan
   const plan = skill('interview-plan');
   check('interview-plan: Q1 from retrieved knowledge and the gap', plan.status === 'success' && plan.details.questions.length === 1 && plan.details.questions[0].knownFrom.length > 0);
-  await p.locator('.plan-rows > li').first().waitFor({ timeout: 8000 });
-  check('interview-plan: screen shows the question rationale graph', (await p.locator('.plan-rows > li').count()) === 1 && (await hint()).includes('$expert-interview'));
-  await p.locator('.step-graph').first().screenshot({ path: `${out}/k3-plan.png` });
+  await p.locator('.story-steps > li').first().waitFor({ timeout: 8000 });
+  check('interview-plan: the story starts from the whole map and leads to Q1', (await p.locator('.story-steps > li').count()) === 5 && (await p.locator('.story-steps > li.current').innerText()).includes('ナレッジ全体') && (await hint()).includes('$expert-interview'));
+  check('interview-plan: story lists retrieved notes, the point to confirm and Q1', plan.details.story.length === 5 && plan.details.story.at(-1).includes('Q1'));
+  await p.locator('.story-steps > li').nth(4).locator('button').click();
+  await p.waitForTimeout(1000);
+  await p.locator('.spot-layout').screenshot({ path: `${out}/k3-plan.png` });
 
   // 5. expert-interview plays the dialogue, then the response
   const interview = skill('expert-interview');
