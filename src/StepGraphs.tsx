@@ -1,12 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  ArrowRight,
-  ChevronLeft,
-  ChevronRight,
-  FileText,
-  Pause,
-  Play,
-} from "lucide-react";
+import { useMemo, useState } from "react";
+import { ArrowRight, ChevronRight, FileText } from "lucide-react";
 import type { Expert, Knowledge, Scenario } from "./data";
 import type { recommendExperts, retrieveKnowledge } from "./process-model";
 import OntologyGraph, { LineSample, stepLineStyles } from "./OntologyGraph";
@@ -14,7 +7,7 @@ import {
   buildOntology,
   candidateOverview,
   expertSpotlight,
-  questionStory,
+  questionPlanProjection,
   retrievalProjection,
   type PlannedQuestion,
 } from "./ontology";
@@ -27,8 +20,6 @@ import {
 
 type Retrieval = ReturnType<typeof retrieveKnowledge>;
 type Candidate = ReturnType<typeof recommendExperts>[number];
-/** How long each step of the Question Plan story stays on screen. */
-export const STORY_STEP_MS = 4200;
 type Common = {
   /** Knowledge as it was when the search ran. */
   knowledge: Knowledge[];
@@ -305,126 +296,41 @@ export function ExpertMatchingMap({
   );
 }
 
-/** Question Plan: the story from the whole map to each generated question. */
-export function QuestionStoryMap({
+/**
+ * Question Plan: only what each question came from — the retrieved notes it
+ * used and the expert's previous answer — then the point to confirm and the
+ * question, drawn in that order. A supplement to the question cards.
+ */
+export function QuestionPlanOntology({
   knowledge,
   scenario,
   retrieval,
   questions,
   onArticle,
-  onOpenGraph,
 }: Common & { retrieval: Retrieval; questions: PlannedQuestion[] }) {
   const ids = questions.map((item) => item.id).join(",");
-  const steps = useMemo(
-    () => questionStory({ knowledge, scenario, retrieval, questions }),
+  const projection = useMemo(
+    () => questionPlanProjection({ knowledge, scenario, retrieval, questions }),
     // Questions appear one by one; the list is rebuilt on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [knowledge, scenario, retrieval, ids],
   );
-  const [index, setIndex] = useState(0);
-  const [playing, setPlaying] = useState(true);
-  // The first step waits for the camera to come in from the whole map.
-  const firstStepMs = STORY_STEP_MS + 900;
-  const last = steps.length - 1;
-  const at = Math.min(index, last);
-  const step = steps[at];
-  useEffect(() => {
-    if (!playing) return;
-    if (at >= last) {
-      setPlaying(false);
-      return;
-    }
-    const timer = window.setTimeout(() => setIndex(at + 1), at === 0 ? firstStepMs : STORY_STEP_MS);
-    return () => window.clearTimeout(timer);
-  }, [playing, at, last, firstStepMs]);
-  const go = (next: number) => {
-    setPlaying(false);
-    setIndex(Math.max(0, Math.min(last, next)));
-  };
   return (
-    <div className="spot-wrap">
-      <div className="spot-layout">
-        <div className="spot-graph">
-          <OntologyGraph
-            variant="embed"
-            initialStage="after"
-            knowledge={knowledge}
-            scenario={scenario}
-            spotlight={step.spotlight}
-            caption={`${at + 1}/${steps.length} ${step.title}`}
-            onArticle={onArticle}
-            introWhole
-          />
-          <StepLegend
-            items={[
-              { ...stepLineStyles.plan, label: "既存知見 → 確認したい点 → 質問（一時表示・保存しない）" },
-              { color: "#7c3aed", dash: "6 4", label: "点線の枠＝今回だけの項目" },
-              { color: "#8a94a6", label: "構造・包含（登録済みの関係）" },
-            ]}
-          />
-        </div>
-        <aside className="spot-panel story-panel" aria-label="質問に至った流れ">
-          <strong className="spot-panel-title">
-            質問に至った流れ
-            <small>ナレッジグラフ全体の中で、参照した既存知見から、まだ分からない点・質問の順にたどります（一時表示・新しい知見として登録しません）。取得した知見の一覧はKnowledge retrievedにあります。</small>
-          </strong>
-          <div className="story-controls" role="group" aria-label="流れの操作">
-            <button type="button" aria-label="前へ" disabled={at === 0} onClick={() => go(at - 1)}>
-              <ChevronLeft size={15} />
-            </button>
-            <button
-              type="button"
-              className="story-play"
-              onClick={() => {
-                if (playing) setPlaying(false);
-                else {
-                  if (at >= last) setIndex(0);
-                  setPlaying(true);
-                }
-              }}
-            >
-              {playing ? <Pause size={14} /> : <Play size={14} />}
-              {playing ? "一時停止" : at >= last ? "最初から再生" : "再生"}
-            </button>
-            <button type="button" aria-label="次へ" disabled={at >= last} onClick={() => go(at + 1)}>
-              <ChevronRight size={15} />
-            </button>
-            <span>
-              {at + 1} / {steps.length}
-            </span>
-          </div>
-          <ol className="story-steps">
-            {steps.map((item, position) => (
-              <li
-                key={item.id}
-                className={position === at ? "current" : position < at ? "done" : ""}
-              >
-                <button
-                  type="button"
-                  aria-current={position === at ? "step" : undefined}
-                  onClick={() => go(position)}
-                >
-                  <span>{position + 1}</span>
-                  {item.title}
-                </button>
-                {position === at && (
-                  <div className="story-body" aria-live="polite">
-                    <p>{item.text}</p>
-                    {item.evidence.length > 0 && (
-                      <ul>
-                        {item.evidence.map((line) => (
-                          <li key={line}>{line}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ol>
-          <OpenGraph onOpenGraph={onOpenGraph} />
-        </aside>
-      </div>
+    <div className="plan-graph">
+      <OntologyGraph
+        variant="inline"
+        knowledge={knowledge}
+        scenario={scenario}
+        projection={projection}
+        onArticle={onArticle}
+      />
+      <StepLegend
+        items={[
+          { color: "#7c3aed", label: "実線の枠＝検索で取得した既存知見（選ぶと本文）" },
+          { ...stepLineStyles.plan, label: "既存知見・直前の回答 → 確認したい点 → 質問（一時表示）" },
+          { color: "#7c3aed", dash: "6 4", label: "点線の枠＝今回だけの項目（保存しない）" },
+        ]}
+      />
     </div>
   );
 }

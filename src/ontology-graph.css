@@ -1162,3 +1162,31 @@
 .onto-embed .onto-floating span {
   flex: none;
 }
+
+/* Question Plan: the point to confirm, then the question, appear after the
+   knowledge they come from. */
+.plan-graph .onto-node.kind-gap,
+.plan-graph .onto-edge.to-gap,
+.plan-graph .onto-edge-label.to-gap {
+  animation: plan-in 0.45s ease 0.35s backwards;
+}
+.plan-graph .onto-node.kind-question,
+.plan-graph .onto-edge.to-question,
+.plan-graph .onto-edge-label.to-question {
+  animation: plan-in 0.45s ease 1s backwards;
+}
+@keyframes plan-in {
+  from {
+    opacity: 0;
+  }
+}
+.plan-graph .onto-step-legend {
+  margin: 8px 0 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .plan-graph .onto-node,
+  .plan-graph .onto-edge,
+  .plan-graph .onto-edge-label {
+    animation: none;
+  }
+}

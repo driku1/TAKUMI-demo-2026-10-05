@@ -16,7 +16,6 @@ import {
   expertSpotlight,
   placeEdgeLabels,
   questionPlanProjection,
-  questionStory,
   retrievalProjection,
   type OntologyNode,
   type OntologyProjection,
@@ -165,67 +164,6 @@ test("匠の選定：全体のグラフ上で、選んだ匠の所属・専門�
       assert.ok(spot.pins.includes(spot.personId) && spot.pins.includes(expected.id));
     }
     assert.equal(people.size, candidates.length, "each candidate is a different person");
-    assert.deepEqual(snapshot(initialKnowledge, scenario), before, "the ontology is unchanged");
-  }
-});
-
-test("質問計画のストーリー：取得した知見の段階は置かず、参照した既存知見 → まだ分からない点 → 質問の順にたどる", () => {
-  for (const scenario of allQuestions) {
-    const run = prepareRun({ query: scenario.question, scenario, knowledge: initialKnowledge });
-    const questions = buildQuestions(run.scenario);
-    const before = snapshot(initialKnowledge, scenario);
-    const view = buildOntology({ knowledge: initialKnowledge, scenario: run.scenario, stage: "after" });
-    const ids = new Set(view.nodes.map((item) => item.id));
-    const edgeIds = new Set(view.edges.map((item) => item.id));
-    for (const count of [1, questions.length]) {
-      const shown = questions.slice(0, count);
-      const steps = questionStory({
-        knowledge: initialKnowledge,
-        scenario: run.scenario,
-        retrieval: run.retrieval,
-        questions: shown,
-      });
-      assert.deepEqual(
-        steps.map((step) => step.id),
-        shown.flatMap((question) => [`known-${question.id}`, `question-${question.id}`]),
-        "2 steps per question (6 with three questions)",
-      );
-      // The first step lights the retrieved notes Q1 rests on, marked 参照.
-      const [first] = steps;
-      const referenced = first.spotlight.nodeIds.filter((id) => first.spotlight.badges[id] === "参照");
-      assert.ok(referenced.length > 0);
-      for (const id of referenced) {
-        const note = view.nodes.find((item) => item.id === id)!;
-        assert.ok(run.retrieval.results.some((result) => result.item.id === note.knowledgeId), id);
-      }
-      assert.match(first.text, /Knowledge retrievedで取得した知見のうち/);
-      for (const step of steps) {
-        const extraIds = new Set(step.spotlight.extraNodes.map((item) => item.id));
-        const extraEdgeIds = new Set(step.spotlight.extraEdges.map((item) => item.id));
-        assert.ok(step.spotlight.nodeIds.every((id) => ids.has(id) || extraIds.has(id)), `${step.id} nodes`);
-        assert.ok(step.spotlight.edgeIds.every((id) => edgeIds.has(id) || extraEdgeIds.has(id)), `${step.id} edges`);
-        assert.ok(step.spotlight.extraNodes.every((item) => item.hypothetical && item.y - item.h / 2 > WORLD.height));
-        assert.ok(step.spotlight.extraEdges.every((item) => item.kind === "plan"));
-        for (const [i, a] of step.spotlight.extraNodes.entries()) {
-          for (const b of step.spotlight.extraNodes.slice(i + 1)) assert.ok(!overlap(a, b), `${step.id}: ${a.id} x ${b.id}`);
-        }
-        assert.ok(step.text.length > 0);
-      }
-      // Each question: the point to confirm and the question are lit in its own step.
-      for (const [index, question] of shown.entries()) {
-        const asked = steps.find((step) => step.id === `question-${question.id}`)!;
-        assert.ok(asked.spotlight.nodeIds.includes(`gap-${question.id}`));
-        assert.ok(asked.spotlight.nodeIds.includes(`question-${question.id}`));
-        assert.ok(asked.spotlight.edgeIds.includes(`plan:gap-${question.id}>question-${question.id}`));
-        assert.ok(asked.evidence.some((line) => line.includes(question.text)));
-        if (index > 0) {
-          // The previous question → the expert's answer → the next point to confirm.
-          const known = steps.find((step) => step.id === `known-${question.id}`)!;
-          assert.ok(known.spotlight.edgeIds.includes(`plan:question-${shown[index - 1].id}>answer-${question.id}`));
-          assert.ok(known.spotlight.edgeIds.includes(`plan:answer-${question.id}>gap-${question.id}`));
-        }
-      }
-    }
     assert.deepEqual(snapshot(initialKnowledge, scenario), before, "the ontology is unchanged");
   }
 });

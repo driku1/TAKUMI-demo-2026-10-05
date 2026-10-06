@@ -33,7 +33,6 @@ import {
   countSummary,
   expertSpotlight,
   questionPlanProjection,
-  questionStory,
 } from "../src/ontology.ts";
 import {
   logEvent,
@@ -462,7 +461,6 @@ ${candidates
     const knowledge = mergeKnowledge(stored.filter((item) => consultation!.knowledgeIds.includes(item.id)));
     const questions = buildQuestions(run.scenario).filter((item) => item.availableAt <= stageTick.plan);
     const plan = questionPlanProjection({ knowledge, scenario: run.scenario, retrieval: run.retrieval, questions });
-    const story = questionStory({ knowledge, scenario: run.scenario, retrieval: run.retrieval, questions });
     const rows = plan.rows.map((row) => ({
       question: `${row.question.id}：${row.question.text}`,
       knownFrom: row.notes.map((note) => `${note.id}「${note.title}」`),
@@ -476,10 +474,6 @@ ${candidates
       `# ${consultation!.id} 質問計画
 
 既存知見 → 確認したい点 → 生成した質問（一時的な計画で、新しい知見としては登録しません）。
-
-## 質問に至った流れ（画面ではナレッジグラフ全体から順に再生）
-
-${story.map((step, index) => `${index + 1}. ${step.title}：${step.text}`).join("\n")}
 
 ${plan.rows
   .map(
@@ -500,11 +494,11 @@ Q2以降は、インタビュー中に匠の回答を受けて生成します。
         consultationId: consultation!.id,
         mode: consultation!.mode,
         artifacts: [artifact],
-        details: { questions: rows, story: story.map((step) => step.title) },
+        details: { questions: rows },
         message: `取得した知見を確認し、まだ分からない点を整理して最初の質問を作りました。${rows
           .map((row) => `既存知見 ${row.knownFrom.join("・")} → 確認したい点「${row.unknown}」 → ${row.question}`)
           .join(" ")} 追加の質問は、インタビュー中に匠の回答を受けて作ります。`,
-        screen: "Question Plan（ナレッジグラフ全体の上で、参照した既存知見 → まだ分からない点 → 質問の流れを自動再生。質問カード）",
+        screen: "Question Plan（参照した既存知見 → 確認したい点 → 質問 のグラフと質問カード）",
         next: "$expert-interview で、匠へのインタビューを始めます。",
       },
       advance("plan"),

@@ -133,7 +133,6 @@ export default function OntologyGraph({
   spotlight,
   caption,
   onNodeClick,
-  introWhole = false,
 }: {
   knowledge: Knowledge[];
   /** Current answer's use of registered knowledge (session only, never saved). */
@@ -155,8 +154,6 @@ export default function OntologyGraph({
   caption?: string;
   /** Embed variant: a node was chosen; return true when handled. */
   onNodeClick?: (node: OntologyNode) => boolean | void;
-  /** Embed variant: open on the whole map, then glide to the spotlight. */
-  introWhole?: boolean;
 }) {
   const uid = useId().replace(/:/g, "");
   const interactive = variant !== "card";
@@ -280,15 +277,7 @@ export default function OntologyGraph({
       : variant === "inline" && focusNodeId
         ? egoLayout(full, focusNodeId, view.usedNodeIds).nodes
         : stageFrameNodes(view, scenario);
-  const introPending = useRef(introWhole);
   useEffect(() => {
-    if (introPending.current && size.w) {
-      introPending.current = false;
-      fitTo(full.nodes);
-      setGlide(false);
-      const timer = window.setTimeout(() => fitTo(frameNodes()), 900);
-      return () => window.clearTimeout(timer);
-    }
     fitTo(frameNodes(), variant === "page" && Boolean(focusNodeId) && autoSelect);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frameKey]);
@@ -357,7 +346,7 @@ export default function OntologyGraph({
   // A step's own emphasis (search hits, the expected note, question bases).
   const emphNodes = new Set(projection?.emphasisNodeIds ?? []);
   const emphEdges = new Set(projection?.emphasisEdgeIds ?? []);
-  // Embed: the spotlight over the whole map (a person, a story step).
+  // Embed: the spotlight over the whole map (Expert Matching).
   const spotNodes = new Set(spotlight?.nodeIds ?? []);
   const spotEdges = new Set(spotlight?.edgeIds ?? []);
   const spotTargets = new Set(spotlight?.targetIds ?? []);
@@ -715,7 +704,7 @@ export default function OntologyGraph({
           </section>
         </aside>
       )}
-      <div className={`onto-body ${variant === "inline" ? "with-list" : ""}`}>
+      <div className={`onto-body ${variant === "inline" && (aside || !projection) ? "with-list" : ""}`}>
         <div
           ref={canvasRef}
           className={`onto-canvas ${variant === "page" && selectedNode ? "has-detail" : ""}`}
@@ -885,6 +874,7 @@ export default function OntologyGraph({
                 const className = [
                   item.id.startsWith("overlay:") ? "onto-overlay" : "onto-edge",
                   `kind-${item.kind}`,
+                  `to-${b.kind}`,
                   item.peripheral ? "peripheral" : "",
                   lit ? "active" : dimming ? "dim" : "",
                   view.stage !== "before" && newEdges.has(item.id) ? "is-new" : "",
@@ -1064,7 +1054,7 @@ export default function OntologyGraph({
                 return (
                   <g
                     key={label.edgeId}
-                    className={`onto-edge-label kind-${item.kind} ${usedEdges.has(item.id) ? "is-used" : view.stage !== "before" && newEdges.has(item.id) ? "is-new" : ""}`}
+                    className={`onto-edge-label kind-${item.kind} to-${nodeById.get(item.target)?.kind} ${usedEdges.has(item.id) ? "is-used" : view.stage !== "before" && newEdges.has(item.id) ? "is-new" : ""}`}
                   >
                     <rect
                       x={label.x}
@@ -1243,7 +1233,7 @@ export default function OntologyGraph({
         {variant === "inline" && aside && (
           <aside className="onto-connections onto-step-list">{aside}</aside>
         )}
-        {variant === "inline" && !aside && (
+        {variant === "inline" && !aside && !projection && (
           <aside className="onto-connections" aria-label="追加した知見の接続先">
             <strong>
               接続先 {focusConnections.length}件

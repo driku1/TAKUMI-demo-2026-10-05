@@ -14,7 +14,7 @@ Codexデスクトップアプリ（Windows）の左側チャットで、スキ�
 | 1 | `$takumi-launch` | デモ: ワークスペース起動 | Knowledge Graph（①登録前／②追加後） | なし（件数を報告） |
 | 2 | `$design-consultation` | デモ: 設計相談の受付・検索 | Knowledge Search（取得した知見・Retrieval graph・Knowledge gap）。登録知見で答えられる場合は、そのまま回答まで表示 | `01-knowledge-search.md`（登録知見で回答した場合は `02-design-response.md` も） |
 | 3 | `$expert-matching` | デモ: 匠の選定 | Expert Matching（左：ナレッジグラフ全体、右：候補5名。名前を選ぶと、知見を追加できるところを強調） | `02-expert-matching.md` |
-| 4 | `$interview-plan` | デモ: 質問計画 | Question Plan（ナレッジグラフ全体から、取得した知見 → まだ分からない点 → 質問 の流れを自動再生） | `03-question-plan.md` |
+| 4 | `$interview-plan` | デモ: 質問計画 | Question Plan（参照した既存知見 → 確認したい点 → 質問 の小さなグラフと質問カード） | `03-question-plan.md` |
 | 5 | `$expert-interview` | デモ: 匠インタビュー | Interview（対話を再生）→ Design Response | `04-interview.md`、`05-design-response.md` |
 | 6 | `$knowledge-pr` | デモ: 知見の登録PR | Knowledge PR（差分・出典・適用条件・レビュー） | `06-knowledge-pr.md` |
 
@@ -79,7 +79,7 @@ $expert-matching 不足している判断基準を聞ける匠を選んでくだ
 $interview-plan 既存の知見で足りない点を整理して、匠への質問を作ってください。
 ```
 
-- ナレッジグラフ全体を表示し、Q1が参照した既存知見へカメラが寄ってから、分かること・まだ分からないこと → 生成した質問Q1 を自動で再生（約5秒で次へ。右のパネルで一時停止・前へ／次へ）。何を取得したかはStep 2のKnowledge Searchで見せたため、ここでは繰り返さない
+- 参照した既存知見だけが表示され、そこから「確認したい点」、続いて「質問Q1」が現れる（約1秒）。何を取得したかはStep 2のKnowledge Searchで見せたため、ここでは繰り返さない
 - 確認したい点と質問は一時表示（新しい知見として登録しない）。Q2以降は、インタビュー中に匠の回答を受けて作る
 
 ### Step 5：匠インタビュー
@@ -139,4 +139,4 @@ $design-consultation この形状を量産する際の注意点は？
 | 「デモサーバーを起動できませんでした」 | アプリのフォルダーで `node start-demo.mjs --skills` を実行し、そのままにしてからスキルを再実行 |
 | 前回のデモの続きになっている | `node scripts/reset-demo.mjs` |
 | 画面のボタンで進めてしまった | `node scripts/reset-demo.mjs` で初期化し、Step 1からやり直す |
-| 匠の選定・質問計画で、グラフの下にパネルが出る（左右に並ばない） | 右側ブラウザの幅が狭い（約1,210px未満）ためです。ブラウザの表示倍率を下げる（Ctrl + −）か、右側ブラウザを広げてください |
+| 匠の選定で、グラフの下にパネルが出る（左右に並ばない） | 右側ブラウザの幅が狭い（約1,210px未満）ためです。ブラウザの表示倍率を下げる（Ctrl + −）か、右側ブラウザを広げてください |
