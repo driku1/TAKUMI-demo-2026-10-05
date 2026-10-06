@@ -78,6 +78,16 @@ PRはローカルで再現した登録フローです。GitHubなど外部のPR�
 
 Expertsは24名・6領域の架空プロフィールを収録しています。専門領域フィルター、氏名・ローマ字・専門タグの検索、相談できる内容の確認に対応します。新しいプロフィールからは関連ナレッジを参照でき、模擬インタビューは従来の3名・3シナリオと、登録知見を使う質問（上の表）で再生します。
 
+## Codexスキルで進めるデモ
+
+Codexデスクトップアプリ（Windows）の左側チャットで6つのスキル（`$takumi-launch` → `$design-consultation` → `$expert-matching` → `$interview-plan` → `$expert-interview` → `$knowledge-pr`）を順番に呼び出すと、右側の画面が次の工程へ進みます。登録PRの Approve review と Merge は人が画面で行います。同じ相談や登録知見で答えられる相談は、`$design-consultation` が自動で登録知見だけから回答します。準備・台本・仕組みは `CODEX_DEMO.md` を参照してください。
+
+```sh
+node scripts/install-codex-skills.mjs   # スキルをCodexに入れる（初回・フォルダー移動後）
+node scripts/reset-demo.mjs            # 録画前に初期化（npm run demo:reset）
+node start-demo.mjs --skills           # スキル連携のデモサーバー（npm run demo:start。最初のスキルが自動起動もする）
+```
+
 ## デモの範囲
 
 - 実際のAI APIや社内システムへの接続はありません。外部への依頼・メッセージ送信は行いません。
@@ -101,6 +111,8 @@ Expertsは24名・6領域の架空プロフィールを収録しています。�
 - `src/ontology.ts`: 製造オントロジーのノード・関係・段階（①〜④）・件数・配置・関係名の配置
 - `src/OntologyGraph.tsx` / `src/ontology-graph.css`: オントロジーグラフの表示と操作（参考デモから移植）
 - `src/StepGraphs.tsx`: 相談の各段階（検索・匠の推薦・質問生成）のグラフ
+- `src/skill-runtime.ts`: Codexスキル連携（デモサーバーの状態に画面を追従させる）
+- `skills/`・`scripts/`: Codexスキルの定義と処理（`CODEX_DEMO.md`）
 - `src/styles.css` / `src/process-workspace.css`: レスポンシブスタイル
 - `tests/`: `npm test` で実行する自動テスト
 

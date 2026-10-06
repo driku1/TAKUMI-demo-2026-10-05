@@ -1,0 +1,7 @@
+interface:
+  display_name: "デモ: 質問計画"
+  short_description: "既存知見から不足点を整理し、匠への質問を作成"
+  default_prompt: "$interview-plan 既存の知見で足りない点を整理して、匠への質問を作ってください。"
+
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+interface:
+  display_name: "デモ: 設計相談の受付・検索"
+  short_description: "ナレッジを検索。登録知見で答えられればそのまま回答"
+  default_prompt: "$design-consultation 樹脂カバーの射出成形で、リブの裏側にヒケが発生します。外観品質を安定させるために、設計と成形条件の両面から改善したいです。"
+
+policy:
+  allow_implicit_invocation: true

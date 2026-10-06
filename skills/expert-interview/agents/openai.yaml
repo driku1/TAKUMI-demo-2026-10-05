@@ -1,0 +1,7 @@
+interface:
+  display_name: "デモ: 匠インタビュー"
+  short_description: "模擬インタビューを再生し、設計への回答を作成"
+  default_prompt: "$expert-interview 鈴木さんにインタビューして、設計への回答をまとめてください。"
+
+policy:
+  allow_implicit_invocation: true

@@ -122,6 +122,27 @@ Knowledge Graphと同じ承認済みオントロジーから、各段階に関�
 - `npm test`（Node組み込みテスト、追加の依存なし）と `tests/` を追加しました。
 - `README.md`、`START_HERE.md` を更新しました。
 
+### 2-5. Codexスキルで進めるデモ
+
+Automotive Summitデモの動画と同じく、Codexデスクトップアプリ（Windows）の左側チャットでスキルを順番に呼び出すと、右側の画面が次の工程へ進むようにしました。手順は `CODEX_DEMO.md` にまとめています。
+
+| スキル | 内容 |
+| --- | --- |
+| `$takumi-launch` | ワークスペースを開き、ナレッジ件数・匠の人数・Knowledge Graphを表示 |
+| `$design-consultation` | 相談を受け付けてナレッジを実際に検索。**同じ相談や、登録知見と既存ナレッジで答えられる相談は、匠の選定・インタビュー・登録PRを行わず自動で登録知見だけから回答**（そのため「登録知見で回答する」専用スキルは作っていません） |
+| `$expert-matching` | 候補の匠と推薦理由、候補者ごとの想定グラフ |
+| `$interview-plan` | 既存知見 → 確認したい点 → 質問 |
+| `$expert-interview` | 模擬インタビューを再生し、設計への回答 |
+| `$knowledge-pr` | 登録PRを作成して画面に表示。**マージはしない**（Approve review と Merge は人が画面で押す） |
+
+- スキルは `node scripts/run-skill.mjs <スキル名>` を実行します。検索・照合・質問計画・オントロジーは画面と同じ関数（`src/`）で行い、結果を `runtime/state.json` に書きます。画面はそれを1秒ごとに読み、次の工程へ進みます。各スキルの出力は `workspace/<相談ID>/` に保存します。
+- デモサーバーは `node start-demo.mjs --skills`（`npm run demo:start`）。最初のスキル実行時に止まっていれば自動で起動します。`--skills` なしで起動した場合は、これまでどおりのブラウザだけのデモです。
+- スキル連携のときは、画面でMergeした知見をデモサーバー（`runtime/knowledge.json`）に保存し、次のスキルの検索で使います。ブラウザのlocalStorageは使いません。
+- 順番を飛ばしたスキルは実行せず、先に実行するスキルを返します。登録知見だけで回答済みの相談では、3〜6のスキルは「不要」と返します。
+- 画面には「Codex skill：次は $expert-matching」のような次の手順の表示と、「Skill完了: …」の通知を出します。登録PRの段階では「画面で Approve review → Merge を押してください」と表示します。
+- `scripts/install-codex-skills.mjs` で6つのスキルを `%USERPROFILE%\.codex\skills` に入れます（このフォルダーの場所を書き込むため、フォルダーを移動したら再実行）。`scripts/reset-demo.mjs` で初期化します。
+- 主なファイル：`skills/`（スキル定義）、`scripts/run-skill.mjs`・`skill-core.ts`・`runtime-store.mjs`・`reset-demo.mjs`・`install-codex-skills.mjs`、`src/skill-runtime.ts`（画面側）、`CODEX_DEMO.md`。
+
 ### 維持した前提
 
 - 製造デモのストーリー（相談 → 検索 → 匠の選定 → 対話・深掘り → 回答 → 登録PR → Approve review → Merge）と既存3シナリオ、画面構成、デザイン。
@@ -137,6 +158,10 @@ Knowledge Graphと同じ承認済みオントロジーから、各段階に関�
 ```sh
 # ビルド済みデモ（npm install不要）
 node start-demo.mjs          # http://127.0.0.1:4173 を開く（使用中なら次の空きポートで起動し、URLを表示。指定: node start-demo.mjs 4174）
+
+# Codexスキルで進めるデモ（Windows・Codexデスクトップアプリ。詳しくは CODEX_DEMO.md）
+node scripts/install-codex-skills.mjs   # 初回だけ
+node scripts/reset-demo.mjs            # 録画前
 
 # ソースから
 npm ci
@@ -155,13 +180,15 @@ npm run dev
 
 | 検証 | 結果 |
 | --- | --- |
-| 自動テスト `npm test` | **36件成功 / 0件失敗**（知見の登録・活用18件、オントロジー13件、相談の各段階のグラフ5件） |
+| 自動テスト `npm test` | **40件成功 / 0件失敗**（知見の登録・活用18件、オントロジー13件、相談の各段階のグラフ5件、Codexスキル4件） |
 | 型チェック `tsc --noEmit` | 成功 |
 | 本番ビルド `npm run build` | 成功（Vite 8.3.2）。`dist/` を更新 |
 | ブラウザでの一連の操作（樹脂成形・`tests/browser/e2e.mjs`） | **72項目成功 / 0件失敗** |
 | ブラウザでの一連の操作（薄肉加工・溶接・`tests/browser/e2e-others.mjs`） | **14項目成功 / 0件失敗** |
 | `start-demo.mjs` のポート処理 | 空きポートで起動／同じバージョンが動作中ならURLを表示して終了／別のページが動作中なら警告して次のポートで起動、の3通りを実際に起動して確認 |
-| 納品ZIPの内容での確認 | 納品物と同じフォルダーで `node start-demo.mjs`（npm install なし）→ 上記ブラウザ確認 **72/72・14/14 成功**。同じフォルダーで `npm ci` → `npm test` **36/36 成功** → `npm run build` 成功。再ビルドした `dist/` は同梱の `dist/` と一致（同梱ビルドが同梱ソースから作られていることを確認）。 |
+| Codexスキルの一連の操作（`tests/browser/e2e-skills.mjs`） | **29項目成功 / 0件失敗**。6つのスキルをCodexと同じコマンドで実行し、画面の追従、順番違い・相談なしの拒否、登録PRでマージしないこと、人が画面でMergeした知見がデモサーバーに保存されること、同じ相談・関連する質問が自動で登録知見だけで回答されること、後続スキルが「不要」になること、再読み込みで工程が戻ること、初期化で画面が最初に戻ることを確認 |
+| スキルのインストール | `CODEX_HOME` を一時フォルダーにして `install-codex-skills.mjs` を実行し、6つの `SKILL.md`・`agents/openai.yaml` が生成され、コマンドにアプリのフォルダーの絶対パスが入ることを確認 |
+| 納品ZIPの内容での確認 | 納品物と同じフォルダーで `node start-demo.mjs`（npm install なし）→ 上記ブラウザ確認 **72/72・14/14 成功**、同じフォルダーで Codexスキルの一連の操作 **29/29 成功**（npm install なし。デモサーバーはスキルが自動起動）。同じフォルダーで `npm ci` → `npm test` **40/40 成功** → `npm run build` 成功。再ビルドした `dist/` は同梱の `dist/` と一致。 |
 
 自動テストで確認した主な内容：
 
@@ -208,6 +235,7 @@ npm run dev
 - **人による目視のデザインレビューは未実施です。**画面の確認はヘッドレスChromiumのスクリーンショットと自動判定によるものです。
 - Safari・Firefox・Edge、実機のスマートフォン・タブレット（タッチ操作・ピンチ操作）では確認していません。
 - Windows・macOSでの `start-demo.mjs` 起動は確認していません（Linuxのみ）。
+- **Codexデスクトップアプリでのスキル実行は確認していません。**検証環境にWindows・Codexがないため、スキルのコマンドを直接実行して確認しました。スキルの書式（`SKILL.md`・`agents/openai.yaml`・右側ブラウザの指示）は、動画で動作していたAutomotive Summitデモのスキルに合わせています。Codexがスキル一覧に表示するか、`--question` に相談文を正しく渡すか、右側ブラウザを開くかは、実機で確認してください。
 - Google Fontsを読み込んだ状態の表示は確認していません（検証環境では取得できず、システムフォントで表示）。文字幅が変わると、ノード内の文字の省略位置が変わる場合があります。
 - 関係名は、空きのない位置では非表示にして重なりを避けています（ノードを選ぶと詳細パネルの関係一覧で全件を確認できます）。全体表示で縮小したときの文字の読みやすさは画面サイズに依存します。
 - 自由入力の振り分けはキーワードによる模擬処理です。用意した質問以外の言い回しでは、登録知見を使う質問として扱われない場合があります。
@@ -219,4 +247,4 @@ npm run dev
 ## 5. 注意事項
 
 - 登場人物、組織、対話、レビュー、ナレッジはすべて架空のデモ用データです。技術提案を実務に使う前に、対象条件に基づく専門家レビューと試作での検証が必要です。
-- 保存データは閲覧者のブラウザ（localStorage の `takumi-knowledge`）に保存されます。ZIPには含まれません。以前の版で作られた `takumi-knowledge-usage` は使用しません（削除しても問題ありません）。
+- 保存データは閲覧者のブラウザ（localStorage の `takumi-knowledge`）に保存されます。Codexスキルで進める場合は、アプリのフォルダーの `runtime/` と `workspace/` に保存されます。どちらもZIPには含まれません。以前の版で作られた `takumi-knowledge-usage` は使用しません（削除しても問題ありません）。

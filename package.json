@@ -7,6 +7,10 @@
     "build": "tsc --noEmit && vite build",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "preview": "vite preview",
+    "demo:start": "node start-demo.mjs --skills",
+    "demo:reset": "node scripts/reset-demo.mjs",
+    "demo:skill": "node scripts/run-skill.mjs",
+    "skills:install": "node scripts/install-codex-skills.mjs",
     "format": "prettier --write src index.html vite.config.ts tsconfig.json"
   },
   "keywords": [],

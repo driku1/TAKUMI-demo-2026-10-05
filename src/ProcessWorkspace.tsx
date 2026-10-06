@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   CheckCircle2,
@@ -30,6 +30,7 @@ import {
   QuestionPlanOntology,
   RetrievalOntology,
 } from "./StepGraphs";
+import { skillRuntime } from "./skill-runtime";
 import "./process-workspace.css";
 
 type Message = Scenario["dialogue"][number];
@@ -57,6 +58,12 @@ type Props = {
   renderMergeGraph?: (savedId: string) => ReactNode;
   /** Graph overlay of the registered knowledge this answer used. */
   renderAnswerGraph?: () => ReactNode;
+  /** Codex skill mode: panel a skill asked to show (null follows the live step). */
+  followRequest?: { step: number | null; nonce: number };
+  /** Codex skill mode: what to do next. */
+  skillHint?: string;
+  /** Codex skill mode: the consultation waits for the next skill. */
+  skillWaiting?: boolean;
 };
 const stages = [
   { name: "Knowledge Search" },
@@ -126,6 +133,17 @@ export default function ProcessWorkspace(props: Props) {
     setSelectedStep(index);
     setFollowExecution(false);
   };
+  // A skill moved the consultation: show its step.
+  useEffect(() => {
+    if (!props.followRequest) return;
+    if (props.followRequest.step === null) {
+      setSelectedEventId(null);
+      setFollowExecution(true);
+    } else {
+      openStep(props.followRequest.step);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.followRequest?.nonce]);
   const editDraft = (field: keyof typeof draft, value: string) => {
     setDraft((previous) => ({ ...previous, [field]: value }));
     setReview("draft");
@@ -300,7 +318,9 @@ export default function ProcessWorkspace(props: Props) {
                   : "Pending review"
                 : running
                   ? "Running"
-                  : "Paused"}
+                  : props.skillWaiting
+                    ? "Waiting for skill"
+                    : "Paused"}
           </span>
           <span className="simulation-badge">Simulation</span>
         </div>
@@ -311,13 +331,19 @@ export default function ProcessWorkspace(props: Props) {
             添付：{props.attachments.join("、")}（ファイル内容は解析対象外）
           </p>
         )}
+        {props.skillHint && (
+          <p className="skill-hint" role="status">
+            <b>Codex skill</b>
+            {props.skillHint}
+          </p>
+        )}
         <div className="run-controls">
           <span>
             Scenario: {scenario.label} · Keyword routing
             {reused ? " · 登録知見を参照" : ""}
           </span>
           <div>
-            {!ready && (
+            {!ready && !props.skillWaiting && (
               <button
                 className="secondary-button"
                 onClick={props.onToggleRunning}
@@ -970,7 +996,7 @@ export default function ProcessWorkspace(props: Props) {
                 <span>1 new note</span>
               </div>
               <p className="trace-note">
-                ローカルの登録PRです。差分確認と模擬レビューの後、マージするとこのブラウザのナレッジベースに登録されます。
+                ローカルの登録PRです。差分確認と模擬レビューの後、マージすると{skillRuntime ? "デモのナレッジベース（runtime/knowledge.json）" : "このブラウザのナレッジベース"}に登録されます。
               </p>
               <details className="pr-similar">
                 <summary>

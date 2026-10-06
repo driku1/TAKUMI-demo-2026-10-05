@@ -1511,3 +1511,27 @@
     gap: 0;
   }
 }
+
+/* Codex skill mode */
+.skill-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border: 1px solid #ddd0f5;
+  border-radius: 8px;
+  background: #faf6ff;
+  color: #3d2560;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.skill-hint b {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #1d1a24;
+  color: #fff;
+  font-size: 10.5px;
+  letter-spacing: 0.3px;
+}

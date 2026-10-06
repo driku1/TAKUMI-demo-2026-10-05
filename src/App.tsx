@@ -24,6 +24,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import {
+  allScenarios,
   experts,
   scenarios,
   followUpScenarios,
@@ -37,6 +38,14 @@ import {
 } from "./data";
 
 import ProcessWorkspace from "./ProcessWorkspace";
+import {
+  fetchSkillKnowledge,
+  fetchSkillState,
+  nextSkillHint,
+  postMerge,
+  skillRuntime,
+  type SkillState,
+} from "./skill-runtime";
 import OntologyGraph from "./OntologyGraph";
 import {
   KNOWLEDGE_STORAGE_KEY,
@@ -118,7 +127,16 @@ export default function App() {
   const [attachments, setAttachments] = useState<File[]>([]);
   const [running, setRunning] = useState(false);
   const [tick, setTick] = useState(-1);
-  const [knowledge, setKnowledge] = useState<Knowledge[]>(readKnowledge);
+  // Codex skill mode keeps Merged knowledge on the demo server; otherwise the browser.
+  const [knowledge, setKnowledge] = useState<Knowledge[]>(() =>
+    skillRuntime ? mergeKnowledge(skillRuntime.knowledge) : readKnowledge(),
+  );
+  // How far the consultation plays: 9 = to the end; a skill stops it at its step.
+  const [targetTick, setTargetTick] = useState(9);
+  const [followRequest, setFollowRequest] = useState<
+    { step: number | null; nonce: number } | undefined
+  >(undefined);
+  const [skillState, setSkillState] = useState<SkillState | null>(null);
   const [runKnowledge, setRunKnowledge] = useState<Knowledge[]>(knowledge);
   const [runId, setRunId] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
@@ -171,16 +189,18 @@ export default function App() {
     const timer = window.setInterval(
       () =>
         setTick((v) => {
-          if (v >= 8 || (quickAnswer && v >= 1)) {
+          if (v >= targetTick) {
             setRunning(false);
-            return 9;
+            return v;
           }
-          return v + 1;
+          const next = v >= 8 || (quickAnswer && v >= 1) ? 9 : v + 1;
+          if (next >= targetTick) setRunning(false);
+          return next;
         }),
       1800,
     );
     return () => clearInterval(timer);
-  }, [running, quickAnswer]);
+  }, [running, quickAnswer, targetTick]);
   useEffect(() => {
     if (toast) {
       const t = setTimeout(() => setToast(""), 3600);
@@ -247,6 +267,7 @@ export default function App() {
     setScenario(matched);
     setBrowseScenario(baseScenarioOf(matched));
     setRunId(crypto.randomUUID());
+    setTargetTick(9);
     setRunning(true);
     setTick(0);
     setSavedId(null);
@@ -258,6 +279,7 @@ export default function App() {
     setSearch("");
     setRunning(false);
     setTick(-1);
+    setTargetTick(9);
     setQuery("");
     setSelectedExample(null);
     setAttachments([]);
@@ -273,8 +295,18 @@ export default function App() {
     setScenario(next);
     setSelectedExample(next.id);
   };
-  const save = (item: Knowledge) => {
+  const save = async (item: Knowledge) => {
     if (savedId) return;
+    if (skillRuntime) {
+      if (!(await postMerge(item, runId))) {
+        setToast("登録できませんでした。デモサーバー（npm run demo:start）が動いているか確認してください。");
+        return;
+      }
+      setKnowledge((current) => addKnowledgeOnce(current, item));
+      setSavedId(item.id);
+      setToast("登録PRをマージし、ナレッジライブラリに追加しました。");
+      return;
+    }
     const next = addKnowledgeOnce(knowledge, item);
     setKnowledge(next);
     setSavedId(item.id);
@@ -287,6 +319,107 @@ export default function App() {
       );
     }
   };
+  // Codex skill mode: follow the step each skill moved the consultation to.
+  const runIdRef = useRef(runId);
+  runIdRef.current = runId;
+  const knowledgeRef = useRef(knowledge);
+  knowledgeRef.current = knowledge;
+  const tickRef = useRef(tick);
+  tickRef.current = tick;
+  const pageRef = useRef(page);
+  pageRef.current = page;
+  const seen = useRef({
+    revision: 0,
+    resetAt: skillRuntime?.state.resetAt,
+    lastSkillAt: skillRuntime?.state.lastSkill?.at,
+    knowledgeRevision: skillRuntime?.state.knowledgeRevision,
+  });
+  const applySkillState = async (state: SkillState, initial: boolean) => {
+    if (state.revision <= seen.current.revision) return;
+    seen.current.revision = state.revision;
+    let current = knowledgeRef.current;
+    if (state.knowledgeRevision !== seen.current.knowledgeRevision) {
+      const stored = await fetchSkillKnowledge();
+      if (stored) {
+        current = mergeKnowledge(stored);
+        knowledgeRef.current = current;
+        setKnowledge(current);
+      }
+      seen.current.knowledgeRevision = state.knowledgeRevision;
+    }
+    setSkillState(state);
+    if (!initial && state.resetAt !== seen.current.resetAt) {
+      seen.current.resetAt = state.resetAt;
+      runIdRef.current = null;
+      reset();
+    }
+    const skillRan = state.lastSkill?.at !== seen.current.lastSkillAt;
+    seen.current.lastSkillAt = state.lastSkill?.at;
+    const consultation = state.consultation;
+    const asked = consultation
+      ? allScenarios.find((item) => item.id === consultation.scenarioId)
+      : undefined;
+    if (consultation && asked && consultation.id !== runIdRef.current) {
+      runIdRef.current = consultation.id;
+      setQuery(consultation.question);
+      setScenario(asked);
+      setBrowseScenario(baseScenarioOf(asked));
+      setSelectedExample(null);
+      setAttachments([]);
+      setRunKnowledge(
+        current.filter(
+          (item) => !item.isNew || consultation.knowledgeIds.includes(item.id),
+        ),
+      );
+      setRunId(consultation.id);
+      setSavedId(consultation.merged ?? null);
+      setExtraMessages([]);
+      setTick(initial ? consultation.targetTick : 0);
+      setTargetTick(consultation.targetTick);
+      setRunning(!initial && consultation.targetTick > 0);
+      setFollowRequest({ step: consultation.step, nonce: Date.now() });
+    } else if (consultation && consultation.id === runIdRef.current) {
+      setTargetTick(consultation.targetTick);
+      if (tickRef.current < consultation.targetTick) setRunning(true);
+      if (consultation.merged) setSavedId(consultation.merged);
+      if (skillRan) setFollowRequest({ step: consultation.step, nonce: Date.now() });
+    }
+    if (initial || skillRan) {
+      if (state.screen === "graph") {
+        setBrowseScenario(
+          scenarios.find((item) => item.id === state.graphScenarioId) ?? scenarios[2],
+        );
+        if (pageRef.current !== "graph") navigate("graph");
+      } else if (state.screen === "consultation" && pageRef.current !== "home") {
+        navigate("home");
+      }
+    }
+    if (!initial && skillRan && state.lastSkill) {
+      setToast(
+        state.lastSkill.status === "success"
+          ? `Skill完了: ${state.lastSkill.name}`
+          : state.lastSkill.message,
+      );
+    }
+  };
+  useEffect(() => {
+    if (!skillRuntime) return;
+    let busy = false;
+    void applySkillState(skillRuntime.state, true);
+    const timer = window.setInterval(async () => {
+      if (busy) return;
+      busy = true;
+      const state = await fetchSkillState();
+      if (state) await applySkillState(state, false);
+      busy = false;
+    }, 1000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const skillConsultation =
+    skillState?.consultation && skillState.consultation.id === runId
+      ? skillState.consultation
+      : null;
   const download = () => {
     const reuse = run.scenario.followUp || run.cited
       ? `\n\n## 登録知見の活用\n${
@@ -548,6 +681,13 @@ export default function App() {
                   savedId={savedId}
                   attachments={attachments.map((file) => file.name)}
                   extraMessages={extraMessages}
+                  followRequest={followRequest}
+                  skillHint={
+                    skillConsultation ? nextSkillHint(skillConsultation) : undefined
+                  }
+                  skillWaiting={
+                    Boolean(skillConsultation) && !running && tick < 9 && tick >= targetTick
+                  }
                   onToggleRunning={() => setRunning((value) => !value)}
                   onReset={reset}
                   onArticle={setArticle}

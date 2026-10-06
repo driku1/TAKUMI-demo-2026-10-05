@@ -1,0 +1,7 @@
+interface:
+  display_name: "デモ: 知見の登録PR"
+  short_description: "知見の登録PRを作成（Approve・Mergeは人が画面で）"
+  default_prompt: "$knowledge-pr 今回の知見を登録PRにしてください。"
+
+policy:
+  allow_implicit_invocation: true

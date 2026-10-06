@@ -1,0 +1,7 @@
+interface:
+  display_name: "デモ: ワークスペース起動"
+  short_description: "ナレッジ件数とナレッジグラフを右側UIに表示"
+  default_prompt: "$takumi-launch を使ってナレッジワークスペースを開いてください。"
+
+policy:
+  allow_implicit_invocation: true

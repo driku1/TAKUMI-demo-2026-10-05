@@ -1,0 +1,7 @@
+interface:
+  display_name: "デモ: 匠の選定"
+  short_description: "候補の匠と、インタビュー後の想定グラフを表示"
+  default_prompt: "$expert-matching 不足している判断基準を聞ける匠を選んでください。"
+
+policy:
+  allow_implicit_invocation: true
