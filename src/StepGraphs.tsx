@@ -3,6 +3,7 @@ import { ArrowRight, ChevronRight, FileText } from "lucide-react";
 import type { Expert, Knowledge, Scenario } from "./data";
 import type { recommendExperts, retrieveKnowledge } from "./process-model";
 import OntologyGraph, { LineSample, stepLineStyles } from "./OntologyGraph";
+import { Portrait } from "./Portrait";
 import {
   buildOntology,
   candidateOverview,
@@ -148,7 +149,7 @@ export function ExpertMatchingMap({
       new Map(
         candidates.map((candidate) => [
           candidate.expert.id,
-          expertSpotlight({ view, scenario, candidate }),
+          expertSpotlight({ view, scenario, candidate, candidates }),
         ]),
       ),
     [view, scenario, candidates],
@@ -173,7 +174,7 @@ export function ExpertMatchingMap({
             caption={
               person
                 ? `${person.expert.name}：インタビューで知見を追加できるところ（想定）`
-                : `候補の匠 ${candidates.length}名 — 名前を選ぶと強調します`
+                : `匠の層の候補 ${candidates.length}名 — 名前を選ぶと強調します`
             }
             onArticle={onArticle}
             onNodeClick={(node) => {
@@ -186,7 +187,8 @@ export function ExpertMatchingMap({
           <StepLegend
             items={[
               { ...stepLineStyles.expected, label: "想定される関係（一時表示・保存しない）" },
-              { color: "#3976f6", label: "所属・専門・執筆（登録済みの関係）" },
+              { color: "#3976f6", label: "所属・専門・執筆（選んだ匠・登録済みの関係）" },
+              { color: "#b9a3f5", label: "ほかの候補者の所属・専門" },
               { color: "#8a94a6", label: "構造・包含（登録済みの関係）" },
             ]}
           />
@@ -194,7 +196,7 @@ export function ExpertMatchingMap({
         <aside className="spot-panel" aria-label="候補の匠">
           <strong className="spot-panel-title">
             候補の匠 {candidates.length}名
-            <small>名前を選ぶと、その人へのインタビューで知見を追加できるところをナレッジグラフで強調します（想定・未登録）。</small>
+            <small>候補者はナレッジグラフの「匠」の層で紫色になっています。名前を選ぶと、その人へのインタビューで知見を追加できるところを強調します（想定・未登録）。似顔絵は生成したイラストです。</small>
           </strong>
           <ol className="candidate-picker">
             {candidates.map((candidate, index) => {
@@ -208,7 +210,10 @@ export function ExpertMatchingMap({
                     aria-pressed={open}
                     onClick={() => choose(candidate.expert.id)}
                   >
-                    <span className="candidate-rank">0{index + 1}</span>
+                    <span className="candidate-face">
+                      <Portrait expert={candidate.expert} size={open ? 48 : 38} />
+                      <span className="candidate-rank">0{index + 1}</span>
+                    </span>
                     <span>
                       <b>{candidate.expert.name}</b>
                       <small>

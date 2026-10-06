@@ -30,7 +30,7 @@ import {
  */
 
 
-export type OntologyLayer = "org" | "process" | "issue" | "document" | "registered";
+export type OntologyLayer = "org" | "people" | "process" | "issue" | "document" | "registered";
 export type NodeKind =
   | "company"
   | "division"
@@ -96,6 +96,8 @@ export type OntologyEdge = {
   used?: boolean;
   /** Drawn faintly unless highlighted (e.g. authorship of many notes). */
   peripheral?: boolean;
+  /** Hierarchy drawn like an org chart: down, across, down. */
+  route?: "elbow";
 };
 
 export type OntologyStage = "before" | "after" | "focus" | "usage";
@@ -177,6 +179,9 @@ const domainDefs: Omit<ClusterDef, "x" | "width">[] = [
       { label: "残留応力", stems: ["残留応力"] },
       { label: "工具摩耗", stems: ["工具", "びびり"] },
       { label: "穴加工", stems: ["穴加工", "ねじ", "ポケット"] },
+      { label: "五軸加工", stems: ["五軸"] },
+      { label: "研削仕上げ", stems: ["研削", "表面粗さ"] },
+      { label: "放電加工", stems: ["放電"] },
     ],
   },
   {
@@ -194,6 +199,9 @@ const domainDefs: Omit<ClusterDef, "x" | "width">[] = [
       { label: "接合", stems: ["接合"] },
       { label: "材料選定", stems: ["材料選定", "腐食", "表面処理"] },
       { label: "薄板", stems: ["薄板"] },
+      { label: "溶接変形", stems: ["溶接変形"] },
+      { label: "熱処理", stems: ["熱処理"] },
+      { label: "アルミ合金", stems: ["アルミ合金", "A6061"] },
     ],
   },
   {
@@ -214,6 +222,10 @@ const domainDefs: Omit<ClusterDef, "x" | "width">[] = [
       { label: "冷却回路", stems: ["冷却"] },
       { label: "保圧", stems: ["保圧"] },
       { label: "外観", stems: ["外観", "限度見本", "シボ"] },
+      { label: "射出成形", stems: ["射出成形"] },
+      { label: "金型設計", stems: ["金型設計"] },
+      { label: "ダイカスト", stems: ["ダイカスト"] },
+      { label: "プレス加工", stems: ["プレス", "スプリングバック"] },
     ],
   },
   {
@@ -262,27 +274,54 @@ const domainDefs: Omit<ClusterDef, "x" | "width">[] = [
   },
 ];
 
-// ── Whole-map layout: organization zone on the left, one column per domain on the right.
-const ORG_X = 20;
-const ORG_COLUMN = 112;
-const ORG_COLUMNS = domainDefs.length + 1; // 製品設計部 (the requester) + one per domain
-const ORG_WIDTH = ORG_COLUMNS * ORG_COLUMN + 40;
-const PRODUCT_X = ORG_X + ORG_WIDTH + 30;
-const DOMAIN_WIDTH = 272;
-const DOMAIN_GAP = 14;
-const DOC_TOP = 470;
-const DOC_STEP = 58;
+// ── Whole-map layout: three layers from top to bottom — organization,
+// people (匠) and product/knowledge — over seven aligned columns: the
+// requester's department first, then one column per process domain, so a
+// team, its people and its domain's knowledge line up.
+const MAP_X = 30;
+const COLUMN_WIDTH = 272;
+const COLUMN_GAP = 14;
+const COLUMNS = domainDefs.length + 1;
+const MAP_WIDTH = COLUMNS * (COLUMN_WIDTH + COLUMN_GAP) - COLUMN_GAP;
+const MAP_CENTER = MAP_X + MAP_WIDTH / 2;
+const columnX = (index: number) => MAP_X + index * (COLUMN_WIDTH + COLUMN_GAP);
+const columnCenter = (index: number) => columnX(index) + COLUMN_WIDTH / 2;
+
+// Organization layer: company → division → department → team.
+const ORG_TOP = 30;
+const COMPANY_Y = 100;
+const DIVISION_Y = 180;
+const DEPARTMENT_Y = 262;
+const TEAM_Y = 342;
+const ORG_BOTTOM = 392;
+// People layer: everyone under their team, two per row.
+const PEOPLE_TOP = ORG_BOTTOM + 18;
+const PERSON_Y = PEOPLE_TOP + 92;
+const PERSON_STEP = 66;
+const PERSON_W = 126;
+const PERSON_H = 56;
+const teamSize = Math.max(
+  ...domainDefs.map((cluster) => experts.filter((expert) => expert.category === cluster.category).length),
+);
+const PEOPLE_BOTTOM = PERSON_Y + (Math.ceil(teamSize / 2) - 1) * PERSON_STEP + PERSON_H / 2 + 26;
+// Knowledge layer: knowledge base → domain → part → topics → Merged notes →
+// (expected note of a consultation) → documents.
+const KNOWLEDGE_TOP = PEOPLE_BOTTOM + 18;
+const ROOT_Y = KNOWLEDGE_TOP + 70;
+const DOMAIN_Y = ROOT_Y + 92;
+const PART_Y = DOMAIN_Y + 80;
+const TOPIC_Y = PART_Y + 76;
 const TOPIC_STEP = 88;
+const TOPIC_ROW = 48;
+const topicRows = Math.max(...domainDefs.map((cluster) => Math.ceil(cluster.topics.length / 3)));
 
 const clusterDefs: ClusterDef[] = domainDefs.map((cluster, index) => ({
   ...cluster,
-  x: PRODUCT_X + 15 + index * (DOMAIN_WIDTH + DOMAIN_GAP),
-  width: DOMAIN_WIDTH,
+  x: columnX(index + 1),
+  width: COLUMN_WIDTH,
 }));
-const PRODUCT_WIDTH = clusterDefs.length * (DOMAIN_WIDTH + DOMAIN_GAP) - DOMAIN_GAP + 30;
 
 const centerX = (cluster: ClusterDef) => cluster.x + cluster.width / 2;
-const orgColumnX = (index: number) => ORG_X + 20 + ORG_COLUMN / 2 + index * ORG_COLUMN;
 
 /** Domain each document is drawn under: the one whose topics its tags name most. */
 const authorCategory = (item: Knowledge) =>
@@ -307,17 +346,20 @@ for (const item of ontologyDocuments) {
 const docRows = Math.max(
   ...clusterDefs.map((cluster) => Math.ceil((documentsBy.get(cluster.id)?.length ?? 0) / 2)),
 );
-/** Row of Merged notes, under every domain's documents. */
-export const KNOWLEDGE_Y = DOC_TOP + docRows * DOC_STEP + 140;
-export const WORLD = {
-  width: PRODUCT_X + PRODUCT_WIDTH + 20,
-  height: KNOWLEDGE_Y + 130,
-};
+/** Row of Merged notes, between the topics and the documents. */
+export const KNOWLEDGE_Y = TOPIC_Y + (topicRows - 1) * TOPIC_ROW + 18 + 50 + 37;
 /**
- * Band under the map for a consultation's temporary items (expected note,
- * question plan). Outside the ontology zones: never part of the graph.
+ * Row under the Merged notes kept for a consultation's temporary expected
+ * note (Expert Matching). Never part of the graph.
  */
-export const STORY_Y = WORLD.height + 70;
+export const EXPECTED_Y = KNOWLEDGE_Y + 112;
+const DOC_TOP = EXPECTED_Y + 52 + 34 + 24;
+const DOC_STEP = 58;
+const KNOWLEDGE_BOTTOM = DOC_TOP + (docRows - 1) * DOC_STEP + 24 + 34;
+export const WORLD = {
+  width: MAP_X * 2 + MAP_WIDTH,
+  height: KNOWLEDGE_BOTTOM + 20,
+};
 
 /** Kept for callers that ordered clusters by theme; the map is fixed now. */
 export function clusterLayout(_caseId?: BaseScenarioId): ClusterDef[] {
@@ -332,34 +374,44 @@ export type ClusterBounds = {
   width: number;
   height: number;
 };
+/** One stripe per domain, through the people and knowledge layers. */
 const boundsFor = (clusters: ClusterDef[]): ClusterBounds[] =>
   clusters.map((cluster) => ({
     id: cluster.id,
     title: cluster.title,
     x: cluster.x,
-    y: 152,
+    y: PEOPLE_TOP + 10,
     width: cluster.width,
-    height: KNOWLEDGE_Y + 60 - 152,
+    height: KNOWLEDGE_BOTTOM - 10 - (PEOPLE_TOP + 10),
   }));
 
 export const zones = [
   {
     id: "org",
     title: "組織 オントロジー",
-    sub: "Company / Division / Department / Team / Person（匠24名と相談者）",
-    x: ORG_X,
-    y: 30,
-    width: ORG_WIDTH,
-    height: KNOWLEDGE_Y + 80,
+    sub: "Company / Division / Department / Team",
+    x: MAP_X - 15,
+    y: ORG_TOP,
+    width: MAP_WIDTH + 30,
+    height: ORG_BOTTOM - ORG_TOP,
+  },
+  {
+    id: "people",
+    title: "匠 オントロジー（人）",
+    sub: `匠${experts.length}名と相談者 · 所属チームの下`,
+    x: MAP_X - 15,
+    y: PEOPLE_TOP,
+    width: MAP_WIDTH + 30,
+    height: PEOPLE_BOTTOM - PEOPLE_TOP,
   },
   {
     id: "product",
     title: "製品・ナレッジ オントロジー",
-    sub: "Knowledge / Domain / Part / Topic / Document / 登録知見（Merge済みのみ）",
-    x: PRODUCT_X,
-    y: 30,
-    width: PRODUCT_WIDTH,
-    height: KNOWLEDGE_Y + 80,
+    sub: "Knowledge / Domain / Part / Topic / 登録知見（Merge済みのみ） / Document",
+    x: MAP_X - 15,
+    y: KNOWLEDGE_TOP,
+    width: MAP_WIDTH + 30,
+    height: KNOWLEDGE_BOTTOM - KNOWLEDGE_TOP,
   },
 ] as const;
 
@@ -443,9 +495,7 @@ function buildBase(): {
     if (edges.some((item) => item.id === id)) return;
     edges.push({ id, source, target, kind, label, ...extra });
   };
-  const orgCenter = ORG_X + ORG_WIDTH / 2;
-
-  // ── Organization ontology: company → division → department → team → person
+  // ── Organization layer: company → division → department → team
   nodes.push(
     node({
       id: "org-company",
@@ -454,9 +504,9 @@ function buildBase(): {
       typeLabel: "Company",
       label: "Manufacturing Co.",
       sub: "架空のデモ企業",
-      x: orgCenter,
-      y: 110,
-      w: 190,
+      x: MAP_CENTER,
+      y: COMPANY_Y,
+      w: 200,
       h: 52,
       path: "Organization",
       desc: "部署・チーム・匠を組織オントロジーとして管理します（架空のデモ企業）。",
@@ -467,10 +517,10 @@ function buildBase(): {
       layer: "org",
       typeLabel: "Division",
       label: "ものづくり事業部",
-      sub: `部署${ORG_COLUMNS}・匠${experts.length}名`,
-      x: orgCenter,
-      y: 200,
-      w: 180,
+      sub: `部署${COLUMNS}・匠${experts.length}名`,
+      x: MAP_CENTER,
+      y: DIVISION_Y,
+      w: 190,
       h: 50,
       path: "Organization → ものづくり事業部",
       desc: "製品設計・生産技術・製造技術・品質・設備・生産企画の各部署を束ねる事業部（デモ）。",
@@ -496,7 +546,7 @@ function buildBase(): {
     })),
   ];
   departments.forEach((department, index) => {
-    const x = orgColumnX(index);
+    const x = columnCenter(index);
     nodes.push(
       node({
         id: department.id,
@@ -506,8 +556,8 @@ function buildBase(): {
         label: department.label,
         sub: department.sub,
         x,
-        y: 300,
-        w: ORG_COLUMN - 8,
+        y: DEPARTMENT_Y,
+        w: 200,
         h: 50,
         path: `Organization → ものづくり事業部 → ${department.label}`,
         desc: department.desc,
@@ -518,20 +568,22 @@ function buildBase(): {
         layer: "org",
         typeLabel: "Team",
         label: department.team.label,
-        sub: department.team.sub || `${department.people.length} members`,
+        sub: department.team.sub || `匠 ${department.people.length}名`,
         x,
-        y: 400,
-        w: ORG_COLUMN - 8,
+        y: TEAM_Y,
+        w: 200,
         h: 50,
         path: `Organization → ${department.label} → ${department.team.label}`,
         desc: `${department.label}のチーム（デモ）。`,
       }),
     );
-    edge("org-division", department.id, "structure", "配下");
+    edge("org-division", department.id, "structure", "配下", { route: "elbow" });
     edge(department.id, department.team.id, "structure", "配下");
+
+    // ── People layer: the team's people, two per row
     const people =
       department.id === "dept-design"
-        ? [{ id: "person-requester", name: "山田 太郎", sub: "相談者", role: "製品設計部 / 設計チーム", focus: "設計相談の起票者（デモ利用者）。", tags: [] as string[] }]
+        ? [{ id: "person-requester", name: "山田 太郎", sub: "相談者 · 製品設計", role: "製品設計部 / 設計チーム", focus: "設計相談の起票者（デモ利用者）。", tags: [] as string[], years: 0 }]
         : department.people.map((expert) => ({
             id: expertNodeId(expert.id),
             name: expert.name,
@@ -539,24 +591,27 @@ function buildBase(): {
             role: expert.role,
             focus: expert.focus,
             tags: expert.tags,
+            years: expert.years,
           }));
-    people.forEach((person, row) => {
+    people.forEach((person, order) => {
+      const single = people.length === 1;
       nodes.push(
         node({
           id: person.id,
           kind: "person",
-          layer: "org",
+          layer: "people",
           typeLabel: department.id === "dept-design" ? "相談者 / Person" : "匠 / Person",
           label: person.name,
           sub: person.sub,
-          x,
-          y: 505 + row * 62,
-          w: ORG_COLUMN - 8,
-          h: 54,
+          x: single ? x : x + (order % 2 === 0 ? -1 : 1) * (PERSON_W / 2 + 5),
+          y: PERSON_Y + Math.floor(order / 2) * PERSON_STEP,
+          w: PERSON_W,
+          h: PERSON_H,
           path: `Organization → ${department.label} → ${department.team.label} → ${person.name}`,
           desc: person.focus,
           facts: [
             { label: "役割", value: person.role },
+            ...(person.years ? [{ label: "経験", value: `${person.years}年` }] : []),
             ...(person.tags.length ? [{ label: "専門", value: person.tags.join(" / ") }] : []),
           ],
         }),
@@ -565,7 +620,7 @@ function buildBase(): {
     });
   });
 
-  // ── Product / knowledge ontology: knowledge → domain → part → topic, documents
+  // ── Knowledge layer: knowledge → domain → part → topic, documents
   nodes.push(
     node({
       id: "root",
@@ -574,8 +629,8 @@ function buildBase(): {
       typeLabel: "Knowledge Base",
       label: "製品・工程ナレッジ",
       sub: `ナレッジ${ontologyDocuments.length}件・工程領域${clusterDefs.length}`,
-      x: PRODUCT_X + PRODUCT_WIDTH / 2,
-      y: 110,
+      x: MAP_CENTER,
+      y: ROOT_Y,
       w: 230,
       h: 54,
       path: "Knowledge",
@@ -595,15 +650,15 @@ function buildBase(): {
         label: cluster.domain,
         sub: `${cluster.team} · ナレッジ${documents.length}件`,
         x: cx,
-        y: 205,
-        w: 190,
+        y: DOMAIN_Y,
+        w: 200,
         h: 50,
         cluster: cluster.id,
         path: `Knowledge → ${cluster.domain}`,
         desc: `${cluster.domain}の工程領域。担当チーム、対象部品、技術・観点、ドキュメントがつながります。`,
       }),
     );
-    edge("root", domainId, "structure", "工程領域");
+    edge("root", domainId, "structure", "工程領域", { route: "elbow" });
     edge(`team-${cluster.id}`, domainId, "organization", "担当");
     let topicParent = domainId;
     if (cluster.part) {
@@ -617,8 +672,8 @@ function buildBase(): {
           label: cluster.part.label,
           sub: cluster.part.sub,
           x: cx,
-          y: 285,
-          w: 150,
+          y: PART_Y,
+          w: 160,
           h: 46,
           cluster: cluster.id,
           path: `Knowledge → ${cluster.domain} → ${cluster.part.label}`,
@@ -641,7 +696,7 @@ function buildBase(): {
           typeLabel: "技術・観点",
           label: topic.label,
           x: cx + (column - (inRow - 1) / 2) * TOPIC_STEP,
-          y: 360 + row * 48,
+          y: TOPIC_Y + row * TOPIC_ROW,
           w: TOPIC_STEP - 8,
           h: 36,
           cluster: cluster.id,
@@ -1074,7 +1129,12 @@ export type EdgeGeometry = {
 };
 
 /** Card-to-card cubic curve, vertical or horizontal like the reference links. */
-export function edgeGeometry(a: OntologyNode, b: OntologyNode): EdgeGeometry {
+export function edgeGeometry(
+  a: OntologyNode,
+  b: OntologyNode,
+  route?: OntologyEdge["route"],
+): EdgeGeometry {
+  if (route === "elbow" && Math.abs(b.x - a.x) > 1) return elbowGeometry(a, b);
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const vertical = Math.abs(dy) > Math.abs(dx) * 0.6;
@@ -1108,6 +1168,48 @@ export function edgeGeometry(a: OntologyNode, b: OntologyNode): EdgeGeometry {
   const f = (value: number) => value.toFixed(1);
   return {
     path: `M${f(p0.x)} ${f(p0.y)} C${f(p1.x)} ${f(p1.y)} ${f(p2.x)} ${f(p2.y)} ${f(p3.x)} ${f(p3.y)}`,
+    point,
+  };
+}
+
+/**
+ * Parent above, child below: down to a bus just above the child row, across,
+ * then down, so lines to far children never cross the children in between.
+ */
+function elbowGeometry(a: OntologyNode, b: OntologyNode): EdgeGeometry {
+  const top = a.y + a.h / 2;
+  const bottom = b.y - b.h / 2 - 3;
+  const bus = bottom - Math.min(24, (bottom - top) / 2);
+  const points = [
+    { x: a.x, y: top },
+    { x: a.x, y: bus },
+    { x: b.x, y: bus },
+    { x: b.x, y: bottom },
+  ];
+  const lengths = points.slice(1).map((point, index) =>
+    Math.hypot(point.x - points[index].x, point.y - points[index].y),
+  );
+  const total = lengths.reduce((sum, value) => sum + value, 0) || 1;
+  const point = (t: number) => {
+    let rest = t * total;
+    for (const [index, length] of lengths.entries()) {
+      if (rest <= length || index === lengths.length - 1) {
+        const ratio = length ? Math.min(1, rest / length) : 0;
+        const from = points[index];
+        const to = points[index + 1];
+        return { x: from.x + (to.x - from.x) * ratio, y: from.y + (to.y - from.y) * ratio };
+      }
+      rest -= length;
+    }
+    return points[3];
+  };
+  const r = Math.min(8, Math.abs(b.x - a.x) / 2, (bus - top) / 2);
+  const dir = Math.sign(b.x - a.x);
+  const f = (value: number) => value.toFixed(1);
+  return {
+    path:
+      `M${f(a.x)} ${f(top)} V${f(bus - r)} Q${f(a.x)} ${f(bus)} ${f(a.x + dir * r)} ${f(bus)}` +
+      ` H${f(b.x - dir * r)} Q${f(b.x)} ${f(bus)} ${f(b.x)} ${f(bus + r)} V${f(bottom)}`,
     point,
   };
 }
@@ -1149,7 +1251,7 @@ export function placeEdgeLabels(
       const a = byId.get(item.source);
       const b = byId.get(item.target);
       if (!a || !b) continue;
-      const geometry = edgeGeometry(a, b);
+      const geometry = edgeGeometry(a, b, item.route);
       const w = textWidth(item.label, fontSize) + 8;
       const h = fontSize + 6;
       // On the line first; in crowded areas, just beside it.
@@ -1759,7 +1861,7 @@ export type Spotlight = {
   edgeIds: string[];
   /** Approved nodes marked as where knowledge can go / what the step is about. */
   targetIds: string[];
-  /** Temporary items in the band under the map. */
+  /** Temporary items (the expected note), in the row kept for them. */
   extraNodes: OntologyNode[];
   extraEdges: OntologyEdge[];
   badges: Record<string, string>;
@@ -1767,11 +1869,31 @@ export type Spotlight = {
   frameIds: string[];
   /** Label of the band holding the temporary items. */
   band?: string;
-  /** Nodes whose names stay readable as labels at any zoom. */
-  pins: string[];
-  /** Text of a pin when it is not the node's label. */
-  pinLabels?: Record<string, string>;
+  /**
+   * Expert Matching: the candidates in the people layer. Being picked is shown
+   * by the person node itself (colour, rank and portrait), not by a label.
+   */
+  people?: { id: string; expertId: number; rank: number; selected: boolean }[];
+  /** Kept visible but light: the other candidates and their specialities. */
+  softNodeIds?: string[];
+  softEdgeIds?: string[];
 };
+
+/** The candidates as drawn in the people layer, in recommendation order. */
+function candidatePeople(candidates: ExpertCandidate[], selected?: ExpertCandidate) {
+  return candidates.flatMap((candidate, index) => {
+    const id = personIdByName(candidate.expert.name);
+    return id
+      ? [{ id, expertId: candidate.expert.id, rank: index + 1, selected: candidate === selected }]
+      : [];
+  });
+}
+
+/** What every candidate is connected to: their team and their specialities. */
+const candidateLinks = (view: Pick<OntologyView, "edges">, people: string[]) =>
+  view.edges.filter(
+    (item) => people.includes(item.source) && (item.label === "所属" || item.label === "専門"),
+  );
 
 const themeCluster = (scenario: Scenario) => clusterDefOf(scenario);
 const edgeBetween = (view: Pick<OntologyView, "edges">, a: string, b: string) =>
@@ -1799,10 +1921,13 @@ export function expertSpotlight({
   view,
   scenario,
   candidate,
+  candidates = [candidate],
 }: {
   view: Pick<OntologyView, "nodes" | "edges">;
   scenario: Scenario;
   candidate: ExpertCandidate;
+  /** All candidates, drawn in the people layer with this one selected. */
+  candidates?: ExpertCandidate[];
 }): ExpertSpotlight {
   const cluster = themeCluster(scenario);
   const byId = new Map(view.nodes.map((item) => [item.id, item]));
@@ -1862,12 +1987,12 @@ export function expertSpotlight({
       label: `${issue}の判断基準`,
       sub: `${candidate.expert.name}へのインタビュー後`,
       x: centerX(cluster),
-      y: STORY_Y + 30,
-      w: 300,
-      h: 104,
+      y: EXPECTED_Y,
+      w: 250,
+      h: 92,
       cluster: cluster.id,
       hypothetical: true,
-      fontScale: 1.5,
+      fontScale: 1.35,
       desc: "インタビュー前の想定です。登録PRをApprove・Mergeするまでグラフには入りません。",
     }),
   ];
@@ -1901,10 +2026,22 @@ export function expertSpotlight({
     targetIds: targets.map((target) => target.id),
     extraNodes,
     extraEdges,
-    badges: { [expectedId]: "想定", [personId]: "選択中" },
-    frameIds: unique([personId, ...(team ? [team.target] : []), ...targets.map((target) => target.id), ...ownRetrieved, expectedId]),
+    badges: { [expectedId]: "想定" },
+    // The person, where they can add knowledge, the expected note and the
+    // first notes they wrote: one column (or two) of the map, close enough to read.
+    frameIds: unique([personId, ...targets.map((target) => target.id), expectedId, ...ownRetrieved.slice(0, 2)]),
     band: "インタビュー後に追加が想定される知見（一時表示・保存しない）",
-    pins: [personId, ...targets.map((target) => target.id), expectedId],
+    people: candidatePeople(candidates, candidate),
+    ...(() => {
+      const others = candidatePeople(candidates)
+        .map((item) => item.id)
+        .filter((id) => id !== personId);
+      const links = candidateLinks(view, others);
+      return {
+        softNodeIds: unique([...others, ...links.map((item) => item.target)]),
+        softEdgeIds: links.map((item) => item.id),
+      };
+    })(),
     personId,
     specialties,
     targets,
@@ -1928,26 +2065,19 @@ export function candidateOverview({
   scenario: Scenario;
   candidates: ExpertCandidate[];
 }): Spotlight {
-  const people = candidates
-    .map((candidate) => personIdByName(candidate.expert.name))
-    .filter((id): id is string => Boolean(id));
-  const edges = view.edges.filter(
-    (item) => people.includes(item.source) && (item.label === "所属" || item.label === "専門"),
-  );
+  const people = candidatePeople(candidates);
+  const edges = candidateLinks(view, people.map((item) => item.id));
   return {
     key: `experts:${scenario.id}`,
     tone: "expected",
-    nodeIds: unique([...people, ...edges.map((item) => item.target)]),
+    nodeIds: unique([...people.map((item) => item.id), ...edges.map((item) => item.target)]),
     edgeIds: edges.map((item) => item.id),
     targetIds: [],
     extraNodes: [],
     extraEdges: [],
-    badges: Object.fromEntries(people.map((id, index) => [id, `候補0${index + 1}`])),
+    badges: {},
     frameIds: [],
-    pins: people,
-    pinLabels: Object.fromEntries(
-      people.map((id, index) => [id, `0${index + 1} ${candidates[index].expert.name}`]),
-    ),
+    people,
   };
 }
 

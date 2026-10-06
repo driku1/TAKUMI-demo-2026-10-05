@@ -10,6 +10,7 @@ import {
 } from "../src/data.ts";
 import { prepareRun } from "../src/knowledge-cycle.ts";
 import {
+  EXPECTED_Y,
   WORLD,
   buildOntology,
   candidateOverview,
@@ -102,7 +103,7 @@ test("同じ相談をもう一度すると、検索結果のグラフで登録�
   assert.equal(notes.sort((a, b) => a.y - b.y)[0].id, "knowledge-1", "shown at the top");
 });
 
-test("匠の選定：全体のグラフ上で、選んだ匠の所属・専門と、知見を追加できるところ（想定）だけを強調する", () => {
+test("匠の選定：匠の層の候補者を色と順位で示し、選んだ匠の所属・専門と、知見を追加できるところ（想定）を強調する", () => {
   for (const scenario of allQuestions) {
     const run = prepareRun({ query: scenario.question, scenario, knowledge: initialKnowledge });
     const candidates = recommendExperts(run.scenario, run.retrieval);
@@ -112,25 +113,48 @@ test("匠の選定：全体のグラフ上で、選んだ匠の所属・専門�
     const edgeIds = new Set(view.edges.map((item) => item.id));
     const retrieved = new Set(run.retrieval.results.map((result) => result.item.id));
 
+    // The candidates are person nodes of the people layer, in order, none selected yet;
+    // no label is pasted on the map to say who was picked.
     const overview = candidateOverview({ view, scenario: run.scenario, candidates });
-    assert.equal(overview.pins.length, candidates.length, "every candidate is named");
     assert.deepEqual(
-      overview.pins.map((id) => overview.pinLabels![id]),
-      candidates.map((candidate, index) => `0${index + 1} ${candidate.expert.name}`),
+      overview.people!.map((item) => [item.expertId, item.rank, item.selected]),
+      candidates.map((candidate, index) => [candidate.expert.id, index + 1, false]),
     );
+    for (const item of overview.people!) {
+      const person = view.nodes.find((entry) => entry.id === item.id)!;
+      assert.equal(person.layer, "people");
+      assert.ok(overview.nodeIds.includes(item.id));
+    }
+    assert.deepEqual(overview.badges, {});
     assert.deepEqual(overview.frameIds, [], "the whole map");
 
     const people = new Set<string>();
     for (const candidate of candidates) {
-      const spot = expertSpotlight({ view, scenario: run.scenario, candidate });
+      const spot = expertSpotlight({ view, scenario: run.scenario, candidate, candidates });
+      assert.deepEqual(
+        spot.people!.filter((item) => item.selected).map((item) => item.id),
+        [spot.personId],
+      );
+      // The other candidates stay visible, lighter.
+      for (const item of spot.people!.filter((entry) => !entry.selected)) {
+        assert.ok(spot.softNodeIds!.includes(item.id) && !spot.nodeIds.includes(item.id));
+      }
+      assert.ok(!Object.keys(spot.badges).includes(spot.personId));
       people.add(spot.personId);
       assert.ok(ids.has(spot.personId), candidate.expert.name);
       assert.ok(spot.nodeIds.includes(spot.personId));
-      // Only one temporary note, under the map, never overlapping it.
+      // Only one temporary note, in the row kept for it in the theme column, never overlapping the map.
       assert.deepEqual(spot.extraNodes.map((item) => item.id), [`expected-${candidate.expert.id}`]);
       const [expected] = spot.extraNodes;
-      assert.ok(expected.hypothetical && expected.y - expected.h / 2 > WORLD.height);
-      assert.ok(view.nodes.every((item) => !overlap(item, expected)));
+      assert.ok(expected.hypothetical && expected.y === EXPECTED_Y);
+      assert.ok(expected.y + expected.h / 2 <= WORLD.height);
+      assert.ok(view.nodes.every((item) => !overlap(item, expected)), "no overlap with the map");
+      // The camera frames the person, where they can add knowledge, the expected note
+      // (and up to two retrieved notes they wrote).
+      for (const id of [spot.personId, ...spot.targets.map((target) => target.id), expected.id]) {
+        assert.ok(spot.frameIds.includes(id), id);
+      }
+      assert.ok(spot.frameIds.length <= spot.targets.length + 4);
       // Temporary relations are 想定 only; lit relations exist on the map or are temporary.
       assert.ok(spot.extraEdges.every((item) => item.kind === "expected" && item.label.endsWith("（想定）")));
       assert.ok(spot.extraEdges.some((item) => item.source === spot.personId && item.label === "回答者（想定）"));
@@ -161,7 +185,6 @@ test("匠の選定：全体のグラフ上で、選んだ匠の所属・専門�
         assert.ok(spot.notes.some((note) => note.id === source.item.id && note.retrieved), source.item.id);
       }
       assert.deepEqual(spot.notes.map((note) => note.retrieved), [...spot.notes.map((note) => note.retrieved)].sort((a, b) => Number(b) - Number(a)));
-      assert.ok(spot.pins.includes(spot.personId) && spot.pins.includes(expected.id));
     }
     assert.equal(people.size, candidates.length, "each candidate is a different person");
     assert.deepEqual(snapshot(initialKnowledge, scenario), before, "the ontology is unchanged");

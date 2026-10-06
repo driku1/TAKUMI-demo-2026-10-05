@@ -35,13 +35,15 @@ import {
   type OntologyStage,
   type Spotlight,
 } from "./ontology";
+import { PortraitArt } from "./Portrait";
 import "./ontology-graph.css";
 
 type Variant = "page" | "card" | "inline" | "embed";
 type Camera = { scale: number; tx: number; ty: number };
 
 const layerLabels: Record<OntologyLayer, string> = {
-  org: "組織 / 部署 / チーム / 匠",
+  org: "組織 / 部署 / チーム",
+  people: "匠（人）",
   process: "工程領域 / 対象部品",
   issue: "技術・観点",
   document: "ドキュメント（既存ナレッジ）",
@@ -200,6 +202,7 @@ export default function OntologyGraph({
   const [selected, setSelected] = useState<string | null>(focusNodeId ?? null);
   const [layers, setLayers] = useState<Record<OntologyLayer, boolean>>({
     org: true,
+    people: true,
     process: true,
     issue: true,
     document: true,
@@ -210,7 +213,6 @@ export default function OntologyGraph({
   const [camera, setCamera] = useState<Camera>({ scale: 0.6, tx: 0, ty: 0 });
   // Embed variant: the camera glides when a step or a person changes the frame.
   const [glide, setGlide] = useState(false);
-  const [framed, setFramed] = useState(0);
   const [size, setSize] = useState({ w: 0, h: heights[variant] });
   const canvasRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -260,7 +262,6 @@ export default function OntologyGraph({
       variant === "page" ? 1.15 : variant === "embed" ? 0.85 : 1.05,
     );
     setGlide(variant === "embed");
-    setFramed((value) => value + 1);
     setCamera({
       scale,
       tx: (width - box.w * scale) / 2 - box.x * scale,
@@ -350,6 +351,10 @@ export default function OntologyGraph({
   const spotNodes = new Set(spotlight?.nodeIds ?? []);
   const spotEdges = new Set(spotlight?.edgeIds ?? []);
   const spotTargets = new Set(spotlight?.targetIds ?? []);
+  const softNodes = new Set(spotlight?.softNodeIds ?? []);
+  const softEdges = new Set(spotlight?.softEdgeIds ?? []);
+  // Expert Matching: candidates are drawn in the people layer with a portrait.
+  const candidates = new Map((spotlight?.people ?? []).map((item) => [item.id, item]));
   const tone = projection?.tone ?? spotlight?.tone;
 
   // Reference behaviour: the selected node and its relations stay lit, the
@@ -403,7 +408,7 @@ export default function OntologyGraph({
   }
   const caseCluster = scenario.followUp?.baseScenarioId ?? scenario.id;
   const inCase = (item: OntologyNode) =>
-    item.cluster === caseCluster || item.layer === "org";
+    item.cluster === caseCluster || item.layer === "org" || item.layer === "people";
   const edgeFont = EDGE_FONT * (largeText ? 1.2 : 1);
   const stagePriority = labelPriority(
     {
@@ -442,90 +447,28 @@ export default function OntologyGraph({
     labelCandidates.map((item) => `${item.id}:${priority(item)}`).join(","),
   ].join("|");
   const labels = useMemo(
-    () => placeEdgeLabels(visibleNodes, labelCandidates, edgeFont, priority),
+    () =>
+      placeEdgeLabels(
+        visibleNodes,
+        // The whole map names each kind of lit relation once (e.g. one 執筆).
+        embed
+          ? labelCandidates.filter(
+              (item, index, all) => all.findIndex((other) => other.label === item.label) === index,
+            )
+          : labelCandidates,
+        edgeFont,
+        priority,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [labelKey],
   );
   // Embed: the band under the map that holds the step's temporary items.
   const band = (() => {
     if (!spotlight?.band || !spotlight.extraNodes.length) return null;
-    const box = boundsOf(spotlight.extraNodes, 26);
+    // Tight above (the Merged notes sit just over it), label underneath.
+    const box = boundsOf(spotlight.extraNodes, 12);
     const width = Math.max(box.w, textWidth(spotlight.band, 13) + 44);
-    return { x: box.x - (width - box.w) / 2, y: box.y - 30, w: width, h: box.h + 30 };
-  })();
-  // Embed: names that stay readable however far the camera is zoomed out.
-  const pins = (() => {
-    if (!embed || !spotlight || !size.w) return [];
-    const placed: {
-      id: string;
-      text: string;
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      kind: string;
-      /** Node centre, for the leader line of a pin set away from its node. */
-      nx: number;
-      ny: number;
-    }[] = [];
-    const font = 11;
-    const overlaps = (a: { x: number; y: number; w: number; h: number }) =>
-      a.x < 4 ||
-      a.y < 46 || // the floating caption
-      a.x + a.w > size.w - 4 ||
-      a.y + a.h > size.h - 4 ||
-      placed.some(
-        (b) => a.x < b.x + b.w + 3 && b.x < a.x + a.w + 3 && a.y < b.y + b.h + 2 && b.y < a.y + a.h + 2,
-      );
-    const screenBox = (item: OntologyNode) => ({
-      x: (item.x - item.w / 2) * camera.scale + camera.tx,
-      y: (item.y - item.h / 2) * camera.scale + camera.ty,
-      w: item.w * camera.scale,
-      h: item.h * camera.scale,
-    });
-    // Lit nodes stay uncovered where possible.
-    const lit = [...spotNodes, ...spotTargets]
-      .map((id) => nodeById.get(id))
-      .filter((item): item is OntologyNode => Boolean(item))
-      .map((item) => ({ id: item.id, ...screenBox(item) }));
-    const coversLit = (a: { x: number; y: number; w: number; h: number }, own: string) =>
-      lit.some(
-        (b) => b.id !== own && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h,
-      );
-    for (const id of spotlight.pins) {
-      const item = nodeById.get(id);
-      if (!item || !visibleIds.has(id)) continue;
-      // Readable as drawn: no pin needed.
-      if (NODE_FONT.title * (item.fontScale ?? 1) * camera.scale >= 9) continue;
-      const sx = item.x * camera.scale + camera.tx;
-      const sy = item.y * camera.scale + camera.ty;
-      const halfW = (item.w / 2) * camera.scale;
-      const halfH = (item.h / 2) * camera.scale;
-      const text = fitText(spotlight.pinLabels?.[id] ?? item.label, 168, font);
-      const w = textWidth(text, font) + 16;
-      const h = 20;
-      const kind = item.hypothetical ? "temp" : spotTargets.has(id) ? "target" : "plain";
-      const spots = [
-        { x: sx - w / 2, y: sy - halfH - h - 3 },
-        { x: sx - w / 2, y: sy + halfH + 3 },
-        { x: sx + halfW + 4, y: sy - h / 2 },
-        { x: sx - halfW - w - 4, y: sy - h / 2 },
-        // Farther away, with a leader line back to the node.
-        ...[1, 2, 3].flatMap((step) => [
-          { x: sx + halfW + 14, y: sy - h / 2 - step * (h + 3) },
-          { x: sx + halfW + 14, y: sy - h / 2 + step * (h + 3) },
-          { x: sx - halfW - w - 14, y: sy - h / 2 - step * (h + 3) },
-          { x: sx - halfW - w - 14, y: sy - h / 2 + step * (h + 3) },
-        ]),
-        { x: sx - w / 2, y: sy - halfH - 2 * h - 6 },
-        { x: sx - w / 2, y: sy + halfH + h + 6 },
-      ];
-      const spot =
-        spots.find((candidate) => !overlaps({ ...candidate, w, h }) && !coversLit({ ...candidate, w, h }, id)) ??
-        spots.find((candidate) => !overlaps({ ...candidate, w, h }));
-      if (spot) placed.push({ id, text, x: spot.x, y: spot.y, w, h, kind, nx: sx, ny: sy });
-    }
-    return placed;
+    return { x: box.x - (width - box.w) / 2, y: box.y, w: width, h: box.h + 22 };
   })();
   const counts = countSummary(view);
   const scale = largeText ? 1.2 : 1;
@@ -861,7 +804,7 @@ export default function OntologyGraph({
               {band && (
                 <g className={`onto-band tone-${tone}`}>
                   <rect x={band.x} y={band.y} width={band.w} height={band.h} rx="18" />
-                  <text x={band.x + 16} y={band.y + 22}>
+                  <text x={band.x + 16} y={band.y + band.h - 9}>
                     {spotlight?.band}
                   </text>
                 </g>
@@ -869,14 +812,14 @@ export default function OntologyGraph({
               {visibleEdges.map((item) => {
                 const a = nodeById.get(item.source)!;
                 const b = nodeById.get(item.target)!;
-                const geometry = edgeGeometry(a, b);
+                const geometry = edgeGeometry(a, b, item.route);
                 const lit = activeEdges.has(item.id);
                 const className = [
                   item.id.startsWith("overlay:") ? "onto-overlay" : "onto-edge",
                   `kind-${item.kind}`,
                   `to-${b.kind}`,
                   item.peripheral ? "peripheral" : "",
-                  lit ? "active" : dimming ? "dim" : "",
+                  lit ? "active" : softEdges.has(item.id) ? "soft" : dimming ? "dim" : "",
                   view.stage !== "before" && newEdges.has(item.id) ? "is-new" : "",
                   usedEdges.has(item.id) ? "is-used" : "",
                   emphEdges.has(item.id) ? `is-emph tone-${tone}` : "",
@@ -898,8 +841,23 @@ export default function OntologyGraph({
                 const isNew = view.stage !== "before" && newNodes.has(item.id);
                 const isUsed = usedNodes.has(item.id) && item.kind === "knowledge";
                 const isTarget = usedNodes.has(item.id) && item.kind !== "knowledge";
-                const dim = dimming && !litNodes.has(item.id);
+                const soft = softNodes.has(item.id) && !litNodes.has(item.id);
+                const dim = dimming && !litNodes.has(item.id) && !soft;
                 const article = projection || embed ? knowledgeOf(item) : undefined;
+                // A candidate in Expert Matching: portrait on the left, rank as its type.
+                const candidate = candidates.get(item.id);
+                // The full Knowledge Graph shows every expert's portrait; Expert
+                // Matching only the candidates', so the pick stands out.
+                const portraitId =
+                  candidate?.expertId ??
+                  (variant === "page" && /^person-\d+$/.test(item.id)
+                    ? Number(item.id.slice("person-".length))
+                    : undefined);
+                const photo = portraitId ? item.h - 10 : 0;
+                const shift = photo ? (photo + 4) / 2 : 0;
+                const typeLabel = candidate
+                  ? `候補 0${candidate.rank}`
+                  : item.typeLabel;
                 const badge =
                   projection?.badges[item.id] ??
                   spotlight?.badges[item.id] ??
@@ -932,6 +890,9 @@ export default function OntologyGraph({
                       `kind-${item.kind}`,
                       selected === item.id ? "selected" : "",
                       dim ? "dim" : "",
+                      soft ? "is-soft" : "",
+                      candidate ? "is-candidate" : "",
+                      candidate?.selected ? "is-picked" : "",
                       isNew ? "is-new" : "",
                       isUsed ? "is-used" : "",
                       isTarget ? "is-used-target" : "",
@@ -946,7 +907,7 @@ export default function OntologyGraph({
                     aria-pressed={interactive ? selected === item.id : undefined}
                     aria-label={
                       interactive
-                        ? `${item.typeLabel}：${item.label}${article && onArticle ? "（本文を開く）" : ""}`
+                        ? `${typeLabel}：${item.label}${article && onArticle ? "（本文を開く）" : ""}`
                         : undefined
                     }
                     onClick={() => {
@@ -961,7 +922,7 @@ export default function OntologyGraph({
                       }
                     }}
                   >
-                    <title>{`${item.typeLabel}：${item.label}`}</title>
+                    <title>{`${typeLabel}：${item.label}`}</title>
                     <rect
                       className="outer"
                       x={-item.w / 2}
@@ -976,7 +937,15 @@ export default function OntologyGraph({
                             : 5
                       }
                     />
-                    {item.kind !== "topic" &&
+                    {portraitId && (
+                      <PortraitArt
+                        expertId={portraitId}
+                        x={-item.w / 2 + 5}
+                        y={-item.h / 2 + 5}
+                        size={photo}
+                      />
+                    )}
+                    {item.kind !== "topic" && !portraitId &&
                       (item.kind === "person" ? (
                         <circle
                           className="node-icon"
@@ -996,11 +965,11 @@ export default function OntologyGraph({
                       ))}
                     <text
                       className="node-type"
-                      x={-item.w / 2 + (item.kind === "topic" ? 9 : 21) * big}
+                      x={-item.w / 2 + (photo ? photo + 10 : (item.kind === "topic" ? 9 : 21) * big)}
                       y={-item.h / 2 + 4 + typeFont}
                       style={{ fontSize: typeFont }}
                     >
-                      {fitText(item.typeLabel, item.w - (item.kind === "topic" ? 18 : 30) * big, typeFont)}
+                      {fitText(typeLabel, item.w - (photo ? photo + 14 : (item.kind === "topic" ? 18 : 30) * big), typeFont)}
                     </text>
                     {wrappedKinds.includes(item.kind) ? (
                       wrapped.map((line, index) => (
@@ -1016,15 +985,17 @@ export default function OntologyGraph({
                     ) : (
                       <text
                         className="node-title"
+                        x={shift}
                         y={titleY}
                         style={{ fontSize: titleFont }}
                       >
-                        {fitText(item.label, item.w - 14, titleFont)}
+                        {fitText(item.label, item.w - 14 - shift * 2, titleFont)}
                       </text>
                     )}
                     {item.sub && (
                       <text
                         className="node-sub"
+                        x={shift}
                         y={
                           wrappedKinds.includes(item.kind)
                             ? item.h / 2 - 9 * big
@@ -1032,7 +1003,7 @@ export default function OntologyGraph({
                         }
                         style={{ fontSize: subFont }}
                       >
-                        {fitText(item.sub, item.w - 14, subFont)}
+                        {fitText(item.sub, item.w - 14 - shift * 2, subFont)}
                       </text>
                     )}
                     {badge && (
@@ -1074,37 +1045,6 @@ export default function OntologyGraph({
                 );
               })}
             </g>
-            {pins.length > 0 && (
-              <g
-                key={framed}
-                className={`onto-pins tone-${tone} ${glide ? "after-glide" : ""}`}
-                aria-hidden="true"
-              >
-                {pins.map((pin) => (
-                  <g
-                    key={pin.id}
-                    className={`onto-pin pin-${pin.kind}`}
-                    onClick={() => {
-                      const item = nodeById.get(pin.id);
-                      if (item) choose(item, knowledgeOf(item));
-                    }}
-                  >
-                    <line
-                      className="pin-leader"
-                      x1={Math.min(Math.max(pin.nx, pin.x), pin.x + pin.w)}
-                      y1={Math.min(Math.max(pin.ny, pin.y), pin.y + pin.h)}
-                      x2={pin.nx}
-                      y2={pin.ny}
-                    />
-                    <circle className="pin-dot" cx={pin.nx} cy={pin.ny} r={2.5} />
-                    <rect x={pin.x} y={pin.y} width={pin.w} height={pin.h} rx={pin.h / 2} />
-                    <text x={pin.x + pin.w / 2} y={pin.y + 14}>
-                      {pin.text}
-                    </text>
-                  </g>
-                ))}
-              </g>
-            )}
           </svg>
           {interactive && (
             <div className="onto-zoom">

@@ -77,6 +77,7 @@ try {
   const f1 = await floating(); const d1 = await domCounts();
   check('E1 counts equal DOM', f1.includes(`${d1.nodes} NODES`) && f1.includes(`${d1.edges} LINKS`), f1);
   check('E1 no overlaps', clean(await overlaps()));
+  check('E1 three layers: organization → 匠 (24 with portraits, plus the requester) → knowledge', (await p.locator('.onto-page .onto-zone').count()) === 3 && (await p.locator('.onto-page .zone-people').count()) === 1 && (await p.locator('.onto-page .onto-node.kind-person').count()) === 25 && (await p.locator('.onto-page .onto-node.kind-person .portrait').count()) === 24);
   const legend = await p.locator('.onto-side').innerText();
   check('E1 sidebar legend names each line type', ['構造・包含', '所属・担当', '参照・出典', '承認', 'タグ一致・本文で言及', '回答で使用（一時表示）'].every((t) => legend.includes(t)));
   check('E1 legend shows line samples', (await p.locator('.onto-side .onto-line-sample').count()) >= 8);
@@ -109,7 +110,8 @@ try {
   const spotNodes = () => p.locator(`${spot} .onto-node`).count();
   const whole = await spotFloating();
   check('S2 Expert Matching: whole ontology left, candidate panel right', (await p.locator(`${spot} .spot-graph + .spot-panel`).count()) === 1 && whole.includes(`${await spotNodes()} NODES`) && (await spotNodes()) > 100, whole);
-  check('S2 overview: every candidate named on the map, nothing temporary', cardCount > 1 && (await p.locator(`${spot} .onto-pin`).count()) === cardCount && (await p.locator(`${spot} .onto-node.is-temporary`).count()) === 0);
+  check('S2 overview: the candidates are coloured person nodes of the people layer, with portraits and no stickers', cardCount > 1 && (await p.locator(`${spot} .onto-node.kind-person.is-candidate`).count()) === cardCount && (await p.locator(`${spot} .onto-node.is-candidate .portrait`).count()) === cardCount && (await p.locator(`${spot} .onto-node.kind-person .portrait`).count()) === cardCount && (await p.locator(`${spot} .onto-node.kind-person .node-badge`).count()) === 0 && (await p.locator(`${spot} .onto-node.is-temporary`).count()) === 0);
+  check('S2 the map has the organization, people and knowledge layers', (await p.locator(`${spot} .onto-zone`).count()) === 3 && (await p.locator(`${spot} .zone-people`).count()) === 1);
   let everyCandidate = true;
   const people = new Set();
   for (let i = 0; i < cardCount; i++) {
@@ -117,14 +119,15 @@ try {
     await p.waitForTimeout(900);
     const name = (await picks.nth(i).locator('b').innerText()).trim();
     const caption = await spotFloating();
-    const personLit = await p.locator(`${spot} .onto-node.is-spot[aria-label$="：${name}"]`).count();
+    const personLit = await p.locator(`${spot} .onto-node.is-picked[aria-label$="：${name}"]`).count();
+    const others = await p.locator(`${spot} .onto-node.is-candidate:not(.is-picked)`).count();
     const targets = await p.locator(`${spot} .onto-node.is-target`).count();
     const listed = await p.locator('.candidate-detail .candidate-targets li').count();
     people.add(name);
     if (
       (await p.locator(`${spot} .onto-node.is-temporary`).count()) !== 1 ||
       !caption.includes(name) || !caption.includes('想定') ||
-      personLit !== 1 || targets < 2 || listed !== targets + 1 ||
+      personLit !== 1 || others !== cardCount - 1 || (await p.locator(`${spot} .onto-node.is-picked`).count()) !== 1 || targets < 2 || listed !== targets + 1 ||
       (await p.locator(`${spot} .onto-node.dim`).count()) === 0 ||
       !clean(await overlaps(spot))
     ) everyCandidate = false;

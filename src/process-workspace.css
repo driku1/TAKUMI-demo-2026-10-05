@@ -1443,7 +1443,7 @@
 }
 .candidate-pick {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   width: 100%;
@@ -1454,6 +1454,30 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+.candidate-face {
+  position: relative;
+  display: inline-flex;
+}
+.candidate-face .portrait {
+  display: block;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 3px #d9cdf7;
+}
+.candidate-pick[aria-pressed="true"] .candidate-face .portrait {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #7c3aed;
+}
+.candidate-face .candidate-rank {
+  position: absolute;
+  right: -6px;
+  bottom: -4px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #d9cdf7;
+  font-size: 9px;
+  line-height: 14px;
+  color: #5b21b6;
 }
 .candidate-pick:hover {
   background: #faf8fd;
