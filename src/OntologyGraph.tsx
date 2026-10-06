@@ -57,9 +57,9 @@ const edgeColors: Record<EdgeKind, string> = {
   tag: "#a3abba",
   approval: "#1f9d6b",
   usage: "#d97706",
-  search: "#0e7490",
+  search: "#7c3aed",
   expected: "#7c3aed",
-  plan: "#be185d",
+  plan: "#7c3aed",
 };
 /** Line samples for the temporary relations of a consultation step. */
 export const stepLineStyles: Record<

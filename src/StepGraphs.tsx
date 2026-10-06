@@ -358,7 +358,7 @@ export function QuestionStoryMap({
           <StepLegend
             items={[
               { ...stepLineStyles.plan, label: "既存知見 → 確認したい点 → 質問（一時表示・保存しない）" },
-              { color: "#be185d", dash: "6 4", label: "点線の枠＝今回だけの項目" },
+              { color: "#7c3aed", dash: "6 4", label: "点線の枠＝今回だけの項目" },
               { color: "#8a94a6", label: "構造・包含（登録済みの関係）" },
             ]}
           />

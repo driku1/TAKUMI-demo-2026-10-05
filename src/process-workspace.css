@@ -1518,7 +1518,7 @@
   margin-left: 4px;
   font-style: normal;
   font-size: 10px;
-  color: #0e7490;
+  color: #6d28d9;
   white-space: nowrap;
 }
 .candidate-targets {
@@ -1565,8 +1565,8 @@
   cursor: pointer;
 }
 .story-controls button.story-play {
-  border-color: #be185d;
-  color: #9d174d;
+  border-color: #7c3aed;
+  color: #5b21b6;
   font-weight: 700;
 }
 .story-controls span {
@@ -1604,16 +1604,16 @@
   color: #3b3546;
 }
 .story-steps > li.done > button span {
-  background: #fbcfe8;
-  color: #9d174d;
+  background: #ddd6fe;
+  color: #5b21b6;
 }
 .story-steps > li.current > button {
-  background: #fdf2f8;
-  color: #831843;
+  background: #f5f3ff;
+  color: #4c1d95;
   font-weight: 700;
 }
 .story-steps > li.current > button span {
-  background: #be185d;
+  background: #7c3aed;
   color: #fff;
 }
 .story-body {
