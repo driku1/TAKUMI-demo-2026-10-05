@@ -1,10 +1,11 @@
 import { useId } from "react";
-import { experts, type Expert } from "./data";
+import type { Expert } from "./data";
 
 /*
- * Illustrated portraits of the (fictional) experts. Generated from the
- * expert's id, category and years — hair, skin tone, glasses and work
- * clothes vary — as flat vector drawings, deliberately not photographic.
+ * Illustrated portraits of the (fictional) experts, shown only in the Expert
+ * Matching candidate panel — never inside a knowledge graph. Generated from
+ * the expert's id, category and years (hair, skin tone, glasses and work
+ * clothes vary) as flat vector drawings, deliberately not photographic.
  */
 
 type Look = {
@@ -86,31 +87,6 @@ function PortraitShapes({ look, clipId }: { look: Look; clipId: string }) {
         )}
       </g>
     </>
-  );
-}
-
-const expertById = (id: number) => experts.find((item) => item.id === id);
-
-/** Portrait inside an SVG (graph nodes). */
-export function PortraitArt({
-  expertId,
-  x,
-  y,
-  size,
-}: {
-  expertId: number;
-  x: number;
-  y: number;
-  size: number;
-}) {
-  const clipId = `${useId().replace(/:/g, "")}-portrait`;
-  const expert = expertById(expertId);
-  if (!expert) return null;
-  return (
-    <svg className="portrait" x={x} y={y} width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
-      <PortraitShapes look={lookFor(expert)} clipId={clipId} />
-      <circle cx="32" cy="32" r="31" fill="none" stroke="#fff" strokeWidth="2" />
-    </svg>
   );
 }
 

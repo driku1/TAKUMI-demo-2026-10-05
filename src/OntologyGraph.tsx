@@ -35,7 +35,6 @@ import {
   type OntologyStage,
   type Spotlight,
 } from "./ontology";
-import { PortraitArt } from "./Portrait";
 import "./ontology-graph.css";
 
 type Variant = "page" | "card" | "inline" | "embed";
@@ -353,7 +352,8 @@ export default function OntologyGraph({
   const spotTargets = new Set(spotlight?.targetIds ?? []);
   const softNodes = new Set(spotlight?.softNodeIds ?? []);
   const softEdges = new Set(spotlight?.softEdgeIds ?? []);
-  // Expert Matching: candidates are drawn in the people layer with a portrait.
+  // Expert Matching: candidates are marked on their person nodes (colour and
+  // rank). No faces are ever drawn inside a knowledge graph.
   const candidates = new Map((spotlight?.people ?? []).map((item) => [item.id, item]));
   const tone = projection?.tone ?? spotlight?.tone;
 
@@ -844,12 +844,8 @@ export default function OntologyGraph({
                 const soft = softNodes.has(item.id) && !litNodes.has(item.id);
                 const dim = dimming && !litNodes.has(item.id) && !soft;
                 const article = projection || embed ? knowledgeOf(item) : undefined;
-                // A candidate in Expert Matching: portrait on the left, rank as its type.
+                // A candidate in Expert Matching: its rank is shown as the type.
                 const candidate = candidates.get(item.id);
-                // Portraits only for the candidates of Expert Matching.
-                const portraitId = candidate?.expertId;
-                const photo = portraitId ? item.h - 10 : 0;
-                const shift = photo ? (photo + 4) / 2 : 0;
                 const typeLabel = candidate
                   ? `候補 0${candidate.rank}`
                   : item.typeLabel;
@@ -932,15 +928,7 @@ export default function OntologyGraph({
                             : 5
                       }
                     />
-                    {portraitId && (
-                      <PortraitArt
-                        expertId={portraitId}
-                        x={-item.w / 2 + 5}
-                        y={-item.h / 2 + 5}
-                        size={photo}
-                      />
-                    )}
-                    {item.kind !== "topic" && !portraitId &&
+                    {item.kind !== "topic" &&
                       (item.kind === "person" ? (
                         <circle
                           className="node-icon"
@@ -960,11 +948,11 @@ export default function OntologyGraph({
                       ))}
                     <text
                       className="node-type"
-                      x={-item.w / 2 + (photo ? photo + 10 : (item.kind === "topic" ? 9 : 21) * big)}
+                      x={-item.w / 2 + (item.kind === "topic" ? 9 : 21) * big}
                       y={-item.h / 2 + 4 + typeFont}
                       style={{ fontSize: typeFont }}
                     >
-                      {fitText(typeLabel, item.w - (photo ? photo + 14 : (item.kind === "topic" ? 18 : 30) * big), typeFont)}
+                      {fitText(typeLabel, item.w - (item.kind === "topic" ? 18 : 30) * big, typeFont)}
                     </text>
                     {wrappedKinds.includes(item.kind) ? (
                       wrapped.map((line, index) => (
@@ -980,17 +968,15 @@ export default function OntologyGraph({
                     ) : (
                       <text
                         className="node-title"
-                        x={shift}
                         y={titleY}
                         style={{ fontSize: titleFont }}
                       >
-                        {fitText(item.label, item.w - 14 - shift * 2, titleFont)}
+                        {fitText(item.label, item.w - 14, titleFont)}
                       </text>
                     )}
                     {item.sub && (
                       <text
                         className="node-sub"
-                        x={shift}
                         y={
                           wrappedKinds.includes(item.kind)
                             ? item.h / 2 - 9 * big
@@ -998,7 +984,7 @@ export default function OntologyGraph({
                         }
                         style={{ fontSize: subFont }}
                       >
-                        {fitText(item.sub, item.w - 14 - shift * 2, subFont)}
+                        {fitText(item.sub, item.w - 14, subFont)}
                       </text>
                     )}
                     {badge && (

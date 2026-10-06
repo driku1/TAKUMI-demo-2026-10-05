@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { followUpScenarios, initialKnowledge, scenarios } from "../src/data.ts";
@@ -299,4 +300,16 @@ test("グラフ外の出典は線にせず、存在しない出典へ接続し�
   const view = buildOntology({ knowledge: [broken, ...initialKnowledge], scenario: molding, stage: "after" });
   assert.ok(view.hiddenSources.includes("missing-note"));
   assert.ok(!view.edges.some((item) => item.target === "doc-missing-note"));
+});
+
+test("ナレッジグラフの中には顔（似顔絵）を描かない（似顔絵は匠の選定の候補者パネルだけ）", () => {
+  const graph = readFileSync(new URL("../src/OntologyGraph.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(graph, /Portrait/);
+  const users = ["App.tsx", "ProcessWorkspace.tsx", "StepGraphs.tsx"].filter((file) =>
+    readFileSync(new URL(`../src/${file}`, import.meta.url), "utf8").includes("<Portrait"),
+  );
+  assert.deepEqual(users, ["StepGraphs.tsx"], "only the candidate panel draws portraits");
+  const panel = readFileSync(new URL("../src/StepGraphs.tsx", import.meta.url), "utf8");
+  const face = panel.indexOf("<Portrait");
+  assert.ok(panel.lastIndexOf('className="candidate-face"', face) > panel.lastIndexOf("<OntologyGraph", face));
 });

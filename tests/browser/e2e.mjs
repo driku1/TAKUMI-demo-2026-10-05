@@ -110,7 +110,8 @@ try {
   const spotNodes = () => p.locator(`${spot} .onto-node`).count();
   const whole = await spotFloating();
   check('S2 Expert Matching: whole ontology left, candidate panel right', (await p.locator(`${spot} .spot-graph + .spot-panel`).count()) === 1 && whole.includes(`${await spotNodes()} NODES`) && (await spotNodes()) > 100, whole);
-  check('S2 overview: the candidates are coloured person nodes of the people layer, with portraits and no stickers', cardCount > 1 && (await p.locator(`${spot} .onto-node.kind-person.is-candidate`).count()) === cardCount && (await p.locator(`${spot} .onto-node.is-candidate .portrait`).count()) === cardCount && (await p.locator(`${spot} .onto-node.kind-person .portrait`).count()) === cardCount && (await p.locator(`${spot} .onto-node.kind-person .node-badge`).count()) === 0 && (await p.locator(`${spot} .onto-node.is-temporary`).count()) === 0);
+  check('S2 overview: the candidates are coloured person nodes of the people layer, no stickers', cardCount > 1 && (await p.locator(`${spot} .onto-node.kind-person.is-candidate`).count()) === cardCount && (await p.locator(`${spot} .onto-node.kind-person .node-badge`).count()) === 0 && (await p.locator(`${spot} .onto-node.is-temporary`).count()) === 0);
+  check('S2 faces only in the candidate panel, never inside the knowledge graph', (await p.locator(`${spot} .spot-graph .portrait`).count()) === 0 && (await p.locator('.candidate-pick .portrait').count()) === cardCount);
   check('S2 the map has the organization, people and knowledge layers', (await p.locator(`${spot} .onto-zone`).count()) === 3 && (await p.locator(`${spot} .zone-people`).count()) === 1);
   let everyCandidate = true;
   const people = new Set();
@@ -158,6 +159,7 @@ try {
   check('S3 one step further back: the consultation → the notes, Q1 → A1, Q2 → A2', (await p.locator(`${planGraph} .onto-node.kind-origin`).count()) === 3 && /相談（検索の起点）：この形状を量産する際の注意点は？/.test(planLabels) && /Q1 · 前の質問（再掲）/.test(planLabels) && /Q2 · 前の質問（再掲）/.test(planLabels) && (await p.locator(`${planGraph} .onto-edge.to-answer`).count()) === 2);
   check('S3 Question plan graph: referenced notes highlighted, temporary items only for points and questions, no overlaps', (await p.locator(`${planGraph} .onto-node.is-emph`).count()) >= 1 && (await p.locator(`${planGraph} .onto-node.is-temporary.kind-document`).count()) === 0 && clean(await overlaps(planGraph)));
   check('S3 question cards stay under the graph', (await p.locator('.question-cards article').count()) === 3);
+  check('No faces inside any knowledge graph on the consultation', (await p.locator('.onto .portrait').count()) === 0);
   await p.locator(planGraph).screenshot({ path: `${out}/s3-plan.png` });
   check('S4 step graphs leave storage empty', Object.keys(await store()).length === 0);
   await gotoGraph();

@@ -60,7 +60,7 @@ try {
   const matching = skill('expert-matching');
   check('expert-matching: candidates and expected graphs', matching.status === 'success' && matching.details.candidates.length === 5);
   await p.locator('.spot-layout .onto-embed').waitFor({ timeout: 8000 });
-  check('expert-matching: screen shows the whole ontology and the five candidates', (await p.locator('.candidate-pick').count()) === 5 && (await p.locator('.spot-layout .onto-node.is-candidate .portrait').count()) === 5 && (await hint()).includes('$interview-plan'));
+  check('expert-matching: screen shows the whole ontology and the five candidates', (await p.locator('.candidate-pick').count()) === 5 && (await p.locator('.spot-layout .onto-node.is-candidate').count()) === 5 && (await p.locator('.spot-layout .spot-graph .portrait').count()) === 0 && (await p.locator('.candidate-pick .portrait').count()) === 5 && (await hint()).includes('$interview-plan'));
   await p.locator('.candidate-pick').first().click();
   await p.waitForTimeout(1000);
   check('expert-matching: the presenter picks a name and the map lights where they can add knowledge', (await p.locator('.spot-layout .onto-node.is-temporary').count()) === 1 && (await p.locator('.spot-layout .onto-node.is-target').count()) >= 2);
