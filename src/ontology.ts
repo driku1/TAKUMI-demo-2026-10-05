@@ -47,7 +47,9 @@ export type NodeKind =
   // Temporary nodes of a consultation step (never part of the ontology).
   | "gap"
   | "question"
-  | "answer";
+  | "answer"
+  // Where a question plan row starts: the consultation, or the question an answer replied to.
+  | "origin";
 export type Phase = "cycle1" | "cycle2";
 
 export type OntologyNode = {
@@ -96,8 +98,11 @@ export type OntologyEdge = {
   used?: boolean;
   /** Drawn faintly unless highlighted (e.g. authorship of many notes). */
   peripheral?: boolean;
-  /** Hierarchy drawn like an org chart: down, across, down. */
-  route?: "elbow";
+  /**
+   * elbow: hierarchy drawn like an org chart (down, across, down).
+   * side: always leaves and enters cards from the side.
+   */
+  route?: "elbow" | "side";
 };
 
 export type OntologyStage = "before" | "after" | "focus" | "usage";
@@ -1137,7 +1142,7 @@ export function edgeGeometry(
   if (route === "elbow" && Math.abs(b.x - a.x) > 1) return elbowGeometry(a, b);
   const dx = b.x - a.x;
   const dy = b.y - a.y;
-  const vertical = Math.abs(dy) > Math.abs(dx) * 0.6;
+  const vertical = route !== "side" && Math.abs(dy) > Math.abs(dx) * 0.6;
   const p0 = vertical
     ? { x: a.x, y: a.y + Math.sign(dy || 1) * (a.h / 2) }
     : { x: a.x + Math.sign(dx || 1) * (a.w / 2), y: a.y };
@@ -1828,6 +1833,36 @@ export function questionPlanProjection({
     }
     edges.push({ id: `plan:${gapId}>${questionId}`, source: gapId, target: questionId, kind: "plan", label: "質問を生成" });
   }
+
+  // One step further back: the consultation the notes were retrieved for,
+  // and the question each answer replied to (shown again in that row).
+  const originX = -columnX - 115 - 70 - 100;
+  const origin = (id: string, typeLabel: string, label: string, y: number) =>
+    node({ id, kind: "origin", layer: "issue", typeLabel, label, x: originX, y, w: 200, h: 74, hypothetical: true });
+  const drawnNotes = [...leftY.keys()].filter((id) => used.has(id));
+  if (drawnNotes.length) {
+    const firstRow = rows[0]?.noteIds.length ? rows[0].noteIds : drawnNotes.slice(0, 1);
+    const y = firstRow.reduce((sum, id) => sum + leftY.get(id)!, 0) / firstRow.length;
+    nodes.push(origin("origin-consultation", "相談（検索の起点）", scenario.question, y));
+    for (const id of drawnNotes) {
+      edges.push({
+        id: `plan:origin-consultation>${id}`,
+        source: "origin-consultation",
+        target: id,
+        kind: "plan",
+        label: "検索で取得",
+        route: "side",
+      });
+    }
+  }
+  rows.forEach((row, index) => {
+    const previous = rows[index - 1]?.question;
+    const answerId = `answer-${row.question.id}`;
+    if (!row.answer || !previous || !leftY.has(answerId)) return;
+    const id = `origin-${previous.id}`;
+    nodes.push(origin(id, `${previous.id} · 前の質問（再掲）`, previous.text, leftY.get(answerId)!));
+    edges.push({ id: `plan:${id}>${answerId}`, source: id, target: answerId, kind: "plan", label: "匠の回答" });
+  });
 
   const noteIds = [...used];
   return {

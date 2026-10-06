@@ -332,7 +332,7 @@ export function QuestionPlanOntology({
       <StepLegend
         items={[
           { color: "#7c3aed", label: "実線の枠＝検索で取得した既存知見（選ぶと本文）" },
-          { ...stepLineStyles.plan, label: "既存知見・直前の回答 → 確認したい点 → 質問（一時表示）" },
+          { ...stepLineStyles.plan, label: "相談・前の質問 → 既存知見・匠の回答 → 確認したい点 → 質問（一時表示）" },
           { color: "#7c3aed", dash: "6 4", label: "点線の枠＝今回だけの項目（保存しない）" },
         ]}
       />

@@ -77,7 +77,7 @@ try {
   const f1 = await floating(); const d1 = await domCounts();
   check('E1 counts equal DOM', f1.includes(`${d1.nodes} NODES`) && f1.includes(`${d1.edges} LINKS`), f1);
   check('E1 no overlaps', clean(await overlaps()));
-  check('E1 three layers: organization → 匠 (24 with portraits, plus the requester) → knowledge', (await p.locator('.onto-page .onto-zone').count()) === 3 && (await p.locator('.onto-page .zone-people').count()) === 1 && (await p.locator('.onto-page .onto-node.kind-person').count()) === 25 && (await p.locator('.onto-page .onto-node.kind-person .portrait').count()) === 24);
+  check('E1 three layers: organization → 匠 (24 and the requester, no portraits) → knowledge', (await p.locator('.onto-page .onto-zone').count()) === 3 && (await p.locator('.onto-page .zone-people').count()) === 1 && (await p.locator('.onto-page .onto-node.kind-person').count()) === 25 && (await p.locator('.onto-page .portrait').count()) === 0);
   const legend = await p.locator('.onto-side').innerText();
   check('E1 sidebar legend names each line type', ['構造・包含', '所属・担当', '参照・出典', '承認', 'タグ一致・本文で言及', '回答で使用（一時表示）'].every((t) => legend.includes(t)));
   check('E1 legend shows line samples', (await p.locator('.onto-side .onto-line-sample').count()) >= 8);
@@ -155,6 +155,7 @@ try {
   check('S3 Question plan graph: only the needed nodes (no whole map, no list beside it)', planNodes > 0 && planNodes < 20 && (await p.locator(`${planGraph} .onto-step-list, ${planGraph} .onto-connections`).count()) === 0 && (await p.locator('.spot-layout').count()) === 0, `${planNodes}`);
   check('S3 Question plan graph: 3 points to confirm → 3 questions', (await p.locator(`${planGraph} .onto-node.kind-question`).count()) === 3 && (await p.locator(`${planGraph} .onto-node.kind-gap`).count()) === 3 && (await p.locator(`${planGraph} .onto-edge.to-question`).count()) === 3);
   check('S3 Q1 rests on retrieved note seed-2-7; Q2 on the previous answer', planLabels.includes('seed-2-7') && /A1/.test(planLabels));
+  check('S3 one step further back: the consultation → the notes, Q1 → A1, Q2 → A2', (await p.locator(`${planGraph} .onto-node.kind-origin`).count()) === 3 && /相談（検索の起点）：この形状を量産する際の注意点は？/.test(planLabels) && /Q1 · 前の質問（再掲）/.test(planLabels) && /Q2 · 前の質問（再掲）/.test(planLabels) && (await p.locator(`${planGraph} .onto-edge.to-answer`).count()) === 2);
   check('S3 Question plan graph: referenced notes highlighted, temporary items only for points and questions, no overlaps', (await p.locator(`${planGraph} .onto-node.is-emph`).count()) >= 1 && (await p.locator(`${planGraph} .onto-node.is-temporary.kind-document`).count()) === 0 && clean(await overlaps(planGraph)));
   check('S3 question cards stay under the graph', (await p.locator('.question-cards article').count()) === 3);
   await p.locator(planGraph).screenshot({ path: `${out}/s3-plan.png` });

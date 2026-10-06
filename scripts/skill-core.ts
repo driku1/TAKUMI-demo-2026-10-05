@@ -477,8 +477,9 @@ ${candidates
 
 ${plan.rows
   .map(
-    (row) => `## ${row.question.id}
+    (row, index) => `## ${row.question.id}
 
+- さかのぼり：${index === 0 || !row.answer ? "相談（検索の起点）→ 既存知見" : `${plan.rows[index - 1].question.id}（前の質問）→ ${row.answer.label}（匠の回答）`}
 - 既存知見：${row.notes.map((note) => `${note.id}「${note.title}」：${note.summary}`).join(" / ")}
 - 確認したい点：${row.unknown}${row.topics.length ? `（観点：${row.topics.join("・")}）` : ""}
 - 生成した質問：${row.question.text}`,

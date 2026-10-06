@@ -72,7 +72,7 @@ export const stepLineStyles: Record<
   expected: { color: edgeColors.expected, dash: "8 5" },
   plan: { color: edgeColors.plan, dash: "2 5" },
 };
-const wrappedKinds = ["knowledge", "gap", "question", "answer"];
+const wrappedKinds = ["knowledge", "gap", "question", "answer", "origin"];
 const relationLegend: {
   kind: EdgeKind;
   name: string;
@@ -846,13 +846,8 @@ export default function OntologyGraph({
                 const article = projection || embed ? knowledgeOf(item) : undefined;
                 // A candidate in Expert Matching: portrait on the left, rank as its type.
                 const candidate = candidates.get(item.id);
-                // The full Knowledge Graph shows every expert's portrait; Expert
-                // Matching only the candidates', so the pick stands out.
-                const portraitId =
-                  candidate?.expertId ??
-                  (variant === "page" && /^person-\d+$/.test(item.id)
-                    ? Number(item.id.slice("person-".length))
-                    : undefined);
+                // Portraits only for the candidates of Expert Matching.
+                const portraitId = candidate?.expertId;
                 const photo = portraitId ? item.h - 10 : 0;
                 const shift = photo ? (photo + 4) / 2 : 0;
                 const typeLabel = candidate

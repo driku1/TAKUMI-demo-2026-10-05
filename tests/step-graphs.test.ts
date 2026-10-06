@@ -222,6 +222,19 @@ test("質問計画のグラフは、参照した既存知見 → 確認したい
           assert.equal(note.rank, run.retrieval.results.indexOf(result) + 1);
         }
       }
+      // One step further back: the consultation the notes were retrieved for,
+      // and the question each answer replied to.
+      const consultation = projection.nodes.find((item) => item.id === "origin-consultation")!;
+      assert.equal(consultation.label, run.scenario.question);
+      for (const item of projection.nodes.filter((entry) => entry.knowledgeId)) {
+        assert.ok(projection.edges.some((edge) => edge.source === consultation.id && edge.target === item.id && edge.label === "検索で取得"), item.id);
+      }
+      for (const [index, row] of rest.entries()) {
+        const previous = shown[index];
+        const origin = projection.nodes.find((item) => item.id === `origin-${previous.id}`)!;
+        assert.equal(origin.label, previous.text);
+        assert.ok(projection.edges.some((edge) => edge.source === origin.id && edge.target === `answer-${row.question.id}` && edge.label === "匠の回答"));
+      }
       for (const [index, row] of rest.entries()) {
         assert.equal(row.unknown, shown[index + 1].purpose);
         assert.equal(row.answer?.text, shown[index + 1].trigger);
