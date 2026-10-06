@@ -146,30 +146,19 @@ try {
   await p.waitForTimeout(500);
   check('S2 choosing a person on the map selects that candidate', (await picks.nth(1).getAttribute('aria-pressed')) === 'true');
 
-  // Question Plan: one minimal graph per question, the question beside it
+  // Question Plan: only the nodes each question came from, then the point to confirm and the question
   await p.locator('.execution-log button', { hasText: 'Question plan ready' }).click();
-  await p.locator('.plan-row').first().waitFor();
-  await p.waitForTimeout(1800);
-  const planRows = await p.locator('.plan-row').count();
-  check('S3 one row per question: its graph on the left, the question on the right', planRows === 3 && (await p.locator('.plan-row .plan-row-graph .onto-inline').count()) === 3 && (await p.locator('.plan-row .plan-row-question h3').count()) === 3 && (await p.locator('.question-cards').count()) === 0);
-  let minimal = true;
-  let readable = true;
-  const rowLabels = [];
-  for (let i = 1; i <= planRows; i++) {
-    const graph = `.plan-row:nth-child(${i}) .plan-row-graph`;
-    rowLabels.push((await p.locator(`${graph} .onto-node`).evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')))).join(' / '));
-    if (
-      (await p.locator(`${graph} .onto-node`).count()) > 6 ||
-      (await p.locator(`${graph} .onto-node.kind-gap`).count()) !== 1 ||
-      (await p.locator(`${graph} .onto-node.kind-question`).count()) !== 0
-    ) minimal = false;
-    if (!clean(await overlaps(graph))) readable = false;
-  }
-  check('S3 each graph is minimal: at most 6 nodes, one point to confirm, the question outside the graph', minimal);
-  check('S3 Q1 goes back to the consultation and the note seed-2-7 it retrieved', /相談（検索の起点）：この形状を量産する際の注意点は？/.test(rowLabels[0]) && rowLabels[0].includes('seed-2-7'));
-  check('S3 Q2 and Q3 go back to the previous question and its answer', /Q1 · 前の質問：/.test(rowLabels[1]) && /A1 ·/.test(rowLabels[1]) && /Q2 · 前の質問：/.test(rowLabels[2]) && /A2 ·/.test(rowLabels[2]));
-  check('S3 graphs readable (no overlaps), referenced notes highlighted', readable && (await p.locator('.plan-row .onto-node.is-emph').count()) >= 1);
-  await p.locator('.plan-list').screenshot({ path: `${out}/s3-plan.png` });
+  await p.locator('.plan-graph .onto-node').first().waitFor();
+  await p.waitForTimeout(1600);
+  const planGraph = '.plan-graph';
+  const planNodes = await p.locator(`${planGraph} .onto-node`).count();
+  const planLabels = (await p.locator(`${planGraph} .onto-node`).evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')))).join(' / ');
+  check('S3 Question plan graph: only the needed nodes (no whole map, no list beside it)', planNodes > 0 && planNodes < 20 && (await p.locator(`${planGraph} .onto-step-list, ${planGraph} .onto-connections`).count()) === 0 && (await p.locator('.spot-layout').count()) === 0, `${planNodes}`);
+  check('S3 Question plan graph: 3 points to confirm → 3 questions', (await p.locator(`${planGraph} .onto-node.kind-question`).count()) === 3 && (await p.locator(`${planGraph} .onto-node.kind-gap`).count()) === 3 && (await p.locator(`${planGraph} .onto-edge.to-question`).count()) === 3);
+  check('S3 Q1 rests on retrieved note seed-2-7; Q2 on the previous answer', planLabels.includes('seed-2-7') && /A1/.test(planLabels));
+  check('S3 Question plan graph: referenced notes highlighted, temporary items only for points and questions, no overlaps', (await p.locator(`${planGraph} .onto-node.is-emph`).count()) >= 1 && (await p.locator(`${planGraph} .onto-node.is-temporary.kind-document`).count()) === 0 && clean(await overlaps(planGraph)));
+  check('S3 question cards stay under the graph', (await p.locator('.question-cards article').count()) === 3);
+  await p.locator(planGraph).screenshot({ path: `${out}/s3-plan.png` });
   check('No faces inside any knowledge graph on the consultation', (await p.locator('.onto .portrait').count()) === 0);
   check('S4 step graphs leave storage empty', Object.keys(await store()).length === 0);
   await gotoGraph();

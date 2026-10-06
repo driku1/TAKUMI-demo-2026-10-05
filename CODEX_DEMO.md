@@ -14,7 +14,7 @@ Codexデスクトップアプリ（Windows）の左側チャットで、スキ�
 | 1 | `$takumi-launch` | デモ: ワークスペース起動 | Knowledge Graph（①登録前／②追加後） | なし（件数を報告） |
 | 2 | `$design-consultation` | デモ: 設計相談の受付・検索 | Knowledge Search（取得した知見・Retrieval graph・Knowledge gap）。登録知見で答えられる場合は、そのまま回答まで表示 | `01-knowledge-search.md`（登録知見で回答した場合は `02-design-response.md` も） |
 | 3 | `$expert-matching` | デモ: 匠の選定 | Expert Matching（左：ナレッジグラフ全体、右：候補5名。名前を選ぶと、知見を追加できるところを強調） | `02-expert-matching.md` |
-| 4 | `$interview-plan` | デモ: 質問計画 | Question Plan（質問ごとに、左に最小限のオントロジー、右に質問） | `03-question-plan.md` |
+| 4 | `$interview-plan` | デモ: 質問計画 | Question Plan（参照した既存知見 → 確認したい点 → 質問 の小さなグラフと質問カード） | `03-question-plan.md` |
 | 5 | `$expert-interview` | デモ: 匠インタビュー | Interview（対話を再生）→ Design Response | `04-interview.md`、`05-design-response.md` |
 | 6 | `$knowledge-pr` | デモ: 知見の登録PR | Knowledge PR（差分・出典・適用条件・レビュー） | `06-knowledge-pr.md` |
 
@@ -79,7 +79,7 @@ $expert-matching 不足している判断基準を聞ける匠を選んでくだ
 $interview-plan 既存の知見で足りない点を整理して、匠への質問を作ってください。
 ```
 
-- 質問ごとに1行：左にその質問に必要な最小限のオントロジー（相談 → 参照した既存知見 → 確認したい点）、右に質問Q1のカード。上から順に現れ、質問は最後に出る（約1秒）。Q2以降は、前の質問 → 匠の回答 からさかのぼれる。何を取得したかはStep 2のKnowledge Searchで見せたため、ここでは繰り返さない
+- 参照した既存知見だけが表示され、そこから「確認したい点」、続いて「質問Q1」が現れる（約1秒）。何を取得したかはStep 2のKnowledge Searchで見せたため、ここでは繰り返さない
 - 確認したい点と質問は一時表示（新しい知見として登録しない）。Q2以降は、インタビュー中に匠の回答を受けて作る
 
 ### Step 5：匠インタビュー

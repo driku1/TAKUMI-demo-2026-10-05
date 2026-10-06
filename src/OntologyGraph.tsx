@@ -71,7 +71,7 @@ export const stepLineStyles: Record<
   expected: { color: edgeColors.expected, dash: "8 5" },
   plan: { color: edgeColors.plan, dash: "2 5" },
 };
-const wrappedKinds = ["knowledge", "gap", "question", "answer", "origin"];
+const wrappedKinds = ["knowledge", "gap", "question", "answer"];
 const relationLegend: {
   kind: EdgeKind;
   name: string;

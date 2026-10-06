@@ -306,60 +306,14 @@
   margin-top: 10px;
   font-size: 11px;
 }
-/* Question Plan: one row per question — its minimal graph, then the question. */
-.plan-list {
-  container-type: inline-size;
-  list-style: none;
-  margin: 10px 0 18px;
-  padding: 0;
+.question-cards {
   display: grid;
-  gap: 14px;
+  gap: 18px;
 }
-.plan-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) auto minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
+.question-cards article {
   border: 1px solid var(--trace-border);
-  border-radius: 10px;
-  background: #fff;
-}
-.plan-row-graph {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid #efeaf5;
-  border-radius: 8px;
-}
-.plan-row-arrow {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  color: #5b21b6;
-  font-size: 10px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.plan-row-question {
-  border: 1px solid var(--trace-border);
-  border-radius: 8px;
-  padding: 16px;
-  animation: plan-in 0.45s ease 1.2s backwards;
-}
-@container (max-width: 640px) {
-  .plan-row {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .plan-row-arrow {
-    flex-direction: row;
-    justify-self: center;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .plan-row-question {
-    animation: none;
-  }
+  border-radius: 6px;
+  padding: 19px;
 }
 .question-title {
   display: flex;
@@ -379,22 +333,22 @@
   margin-left: auto;
   font-size: 10px;
 }
-.plan-row-question h3 {
+.question-cards h3 {
   font-size: 14px;
   line-height: 1.9;
-  margin: 12px 0;
+  margin: 15px 0;
 }
-.plan-row-question dl {
+.question-cards dl {
   display: grid;
   grid-template-columns: 95px 1fr;
   gap: 9px;
   font-size: 11px;
   line-height: 1.8;
 }
-.plan-row-question dt {
+.question-cards dt {
   color: var(--trace-muted);
 }
-.plan-row-question dd {
+.question-cards dd {
   margin: 0;
 }
 .process-workspace blockquote {
@@ -935,17 +889,17 @@
   .retrieval-score {
     display: none;
   }
-  .plan-row-question {
+  .question-cards article {
     padding: 14px;
   }
-  .plan-row-question dl {
+  .question-cards dl {
     grid-template-columns: 1fr;
     gap: 4px;
   }
-  .plan-row-question dd {
+  .question-cards dd {
     margin-bottom: 6px;
   }
-  .plan-row-question h3 {
+  .question-cards h3 {
     font-size: 12px;
   }
   .question-title {

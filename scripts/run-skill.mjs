@@ -7,7 +7,25 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// The skill logic reuses the app's TypeScript modules.
+// The skill logic reuses the app's TypeScript modules, which Node.js runs
+// directly from 22.6 on. Older versions get a clear message instead of
+// "bad option".
+const [major, minor] = process.versions.node.split('.').map(Number);
+if (major < 22 || (major === 22 && minor < 6)) {
+  console.log(
+    JSON.stringify(
+      {
+        skill: process.argv[2] ?? null,
+        status: 'error',
+        message: `Codexスキルの実行には Node.js 22.12 以降が必要です（現在 ${process.version}）。https://nodejs.org/ からLTS版をインストールしてください。画面だけのデモ（node start-demo.mjs）は Node.js 18 以降で動きます。`,
+        next: 'Node.js を更新してから、同じスキルをもう一度実行してください。',
+      },
+      null,
+      2,
+    ),
+  );
+  process.exit(1);
+}
 if (!process.features?.typescript) {
   const result = spawnSync(
     process.execPath,

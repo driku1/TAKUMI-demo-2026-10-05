@@ -47,6 +47,7 @@ import {
   type SkillState,
 } from "./skill-runtime";
 import OntologyGraph from "./OntologyGraph";
+import { newId } from "./uid";
 import {
   KNOWLEDGE_STORAGE_KEY,
   addKnowledgeOnce,
@@ -266,7 +267,7 @@ export default function App() {
     setRunKnowledge([...knowledge]);
     setScenario(matched);
     setBrowseScenario(baseScenarioOf(matched));
-    setRunId(crypto.randomUUID());
+    setRunId(newId());
     setTargetTick(9);
     setRunning(true);
     setTick(0);

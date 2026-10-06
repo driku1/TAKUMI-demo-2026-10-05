@@ -191,76 +191,49 @@ test("匠の選定：匠の層の候補者を色と順位で示し、選んだ�
   }
 });
 
-test("質問計画は質問ごとに最小限のグラフ（相談・前の質問 → 既存知見・回答 → 確認したい点）を一時表示する", () => {
+test("質問計画のグラフは、参照した既存知見 → 確認したい点 → 生成した質問を一時表示する", () => {
   for (const scenario of allQuestions) {
     const run = prepareRun({ query: scenario.question, scenario, knowledge: initialKnowledge });
     const questions = buildQuestions(run.scenario);
-    const retrieved = new Set(run.retrieval.results.map((result) => result.item.id));
     for (const count of [1, questions.length]) {
       const shown = questions.slice(0, count);
       const before = snapshot(initialKnowledge, scenario);
-      const plan = questionPlanProjection({
+      const projection = questionPlanProjection({
         knowledge: initialKnowledge,
         scenario: run.scenario,
         retrieval: run.retrieval,
         questions: shown,
       });
       assert.deepEqual(snapshot(initialKnowledge, scenario), before);
-      assert.equal(plan.rows.length, count);
-      const [first, ...rest] = plan.rows;
+      assert.equal(projection.rows.length, count);
+      const [first, ...rest] = projection.rows;
       assert.equal(first.unknown, run.scenario.gap);
       assert.ok(first.notes.length > 0, `${scenario.id}: Q1 rests on retrieved knowledge`);
-      for (const [index, row] of plan.rows.entries()) {
+      for (const [index, row] of projection.rows.entries()) {
         const question = shown[index];
-        const { graph } = row;
-        const label = `plan ${scenario.id} ${question.id}`;
         assert.equal(row.question.id, question.id);
-        // The question itself is beside the graph; the graph ends at the point to confirm.
-        assert.ok(!graph.nodes.some((item) => item.kind === "question"), label);
-        const gap = graph.nodes.find((item) => item.id === `gap-${question.id}`)!;
-        assert.ok(gap.hypothetical);
-        // Only this question's notes (retrieved, highlighted) and answer.
-        const notes = graph.nodes.filter((item) => !item.hypothetical);
-        assert.deepEqual(notes.map((item) => item.knowledgeId).sort(), row.notes.map((note) => note.id).sort(), label);
-        assert.ok(notes.every((item) => retrieved.has(item.knowledgeId!)));
-        assert.deepEqual([...graph.emphasisNodeIds].sort(), notes.map((item) => item.id).sort());
+        assert.ok(projection.nodes.some((item) => item.id === `question-${question.id}` && item.hypothetical));
+        assert.ok(projection.nodes.some((item) => item.id === `gap-${question.id}` && item.hypothetical));
+        assert.ok(projection.edges.some((item) => item.source === `gap-${question.id}` && item.target === `question-${question.id}` && item.label === "質問を生成"));
         for (const note of row.notes) {
           const result = run.retrieval.results.find((entry) => entry.item.id === note.id);
           assert.ok(result, `${note.id} was retrieved`);
           assert.equal(note.summary, result.item.summary);
           assert.equal(note.rank, run.retrieval.results.indexOf(result) + 1);
         }
-        // One step further back: the consultation → its notes; the previous question → the answer.
-        const consultation = graph.nodes.find((item) => item.id === "origin-consultation");
-        assert.equal(Boolean(consultation), notes.length > 0, label);
-        if (consultation) assert.equal(consultation.label, run.scenario.question);
-        for (const item of notes) {
-          assert.ok(graph.edges.some((edge) => edge.source === "origin-consultation" && edge.target === item.id && edge.label === "検索で取得"), item.id);
-          assert.ok(graph.edges.some((edge) => edge.source === item.id && edge.target === gap.id && edge.label === "参照した既存知見"), item.id);
-        }
-        if (index > 0 && row.answer) {
-          const previous = shown[index - 1];
-          const origin = graph.nodes.find((item) => item.id === `origin-${previous.id}`)!;
-          assert.equal(origin.label, previous.text);
-          assert.ok(graph.edges.some((edge) => edge.source === origin.id && edge.target === `answer-${question.id}` && edge.label === "匠の回答"));
-          assert.ok(graph.edges.some((edge) => edge.source === `answer-${question.id}` && edge.target === gap.id && edge.label === "直前の回答"));
-        }
-        // Read from the top: origins, then notes and answers, then the point to confirm.
-        for (const item of graph.nodes) {
-          const tier = item.kind === "origin" ? 0 : item.kind === "gap" ? 2 : 1;
-          assert.ok(graph.nodes.every((other) => {
-            const otherTier = other.kind === "origin" ? 0 : other.kind === "gap" ? 2 : 1;
-            return otherTier <= tier || other.y > item.y;
-          }), item.id);
-        }
-        assert.ok(graph.edges.every((item) => item.kind === "plan"));
-        assertReadable(graph, label);
       }
       for (const [index, row] of rest.entries()) {
         assert.equal(row.unknown, shown[index + 1].purpose);
         assert.equal(row.answer?.text, shown[index + 1].trigger);
         assert.ok(run.scenario.dialogue.some((message) => message.speaker === "expert" && message.text === row.answer?.text));
       }
+      // Only retrieved notes are highlighted; everything else drawn is temporary.
+      const retrieved = new Set(run.retrieval.results.map((result) => result.item.id));
+      for (const item of projection.nodes) {
+        if (!item.hypothetical) assert.ok(item.knowledgeId && retrieved.has(item.knowledgeId), item.id);
+      }
+      assert.ok(projection.edges.every((item) => item.kind === "plan"));
+      assertReadable(projection, `plan ${scenario.id} x${count}`);
     }
   }
 });
