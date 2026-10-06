@@ -27,9 +27,11 @@ import {
 } from "./knowledge-cycle";
 import {
   ExpertMatchingMap,
-  QuestionPlanOntology,
+  QuestionPlanLegend,
+  QuestionRationaleGraph,
   RetrievalOntology,
 } from "./StepGraphs";
+import { questionPlanProjection } from "./ontology";
 import { skillRuntime } from "./skill-runtime";
 import "./process-workspace.css";
 
@@ -117,6 +119,20 @@ export default function ProcessWorkspace(props: Props) {
   const ready = tick >= 9;
   const visibleQuestions = questions.filter(
     (question) => question.availableAt <= tick,
+  );
+  const visibleIds = visibleQuestions.map((question) => question.id).join(",");
+  // Question Plan: one minimal graph per question that has been generated.
+  const plan = useMemo(
+    () =>
+      questionPlanProjection({
+        knowledge: props.knowledge,
+        scenario,
+        retrieval,
+        questions: visibleQuestions,
+      }),
+    // visibleQuestions is rebuilt on every render; its ids are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [props.knowledge, scenario, retrieval, visibleIds],
   );
   const validDraft = Object.values(draft).every(
     (value) => value.trim().length > 0,
@@ -572,62 +588,69 @@ export default function ProcessWorkspace(props: Props) {
           {activeStep === 2 && (
             <>
               <p className="trace-intro">
-                検索結果から初回質問を作成し、匠の回答を受け取るごとに追加質問を生成します。グラフでは、質問ごとに、参照した既存知見（と直前の匠の回答）から「確認したい点」、そこから質問を作ったつながりだけを示します。左端から一つ前にさかのぼれます：既存知見は相談の検索で取得したもの、匠の回答は前の質問への回答です（何を取得したかは Knowledge Search で確認できます）。
+                検索結果から初回質問を作成し、匠の回答を受け取るごとに追加質問を生成します。質問ごとに、左にその質問に必要な最小限のオントロジー（相談・前の質問 → 参照した既存知見・匠の回答 → 確認したい点）、右に生成した質問を表示します（何を取得したかは Knowledge Search で確認できます）。
               </p>
               {visibleQuestions.length > 0 && (
-                <>
-                  <h3 className="trace-section-heading">
-                    <Network size={16} /> Question rationale graph
-                    <small>相談・前の質問 → 既存知見・匠の回答 → 確認したい点 → 質問（一時表示）</small>
-                  </h3>
-                  <div className="step-graph">
-                    <QuestionPlanOntology
-                      knowledge={props.knowledge}
-                      scenario={scenario}
-                      retrieval={retrieval}
-                      questions={visibleQuestions}
-                      onArticle={props.onArticle}
-                      onOpenGraph={props.onOpenGraph}
-                    />
-                  </div>
-                </>
+                <h3 className="trace-section-heading">
+                  <Network size={16} /> Question rationale
+                  <small>質問ごとの根拠のグラフ（一時表示・保存しない）</small>
+                </h3>
               )}
-              <div className="question-cards">
-                {visibleQuestions.map((question, index) => (
-                  <article key={question.id}>
-                    <div className="question-title">
-                      <strong>{question.id}</strong>
-                      <span>
-                        {index === 0
-                          ? "Initial question"
-                          : "Follow-up question"}
+              {visibleQuestions.length > 0 && <QuestionPlanLegend />}
+              <ol className="plan-list">
+                {visibleQuestions.map((question, index) => {
+                  const row = plan.rows.find((item) => item.question.id === question.id);
+                  return (
+                    <li key={question.id} className="plan-row">
+                      <div className="plan-row-graph">
+                        {row && (
+                          <QuestionRationaleGraph
+                            knowledge={props.knowledge}
+                            scenario={scenario}
+                            graph={row.graph}
+                            onArticle={props.onArticle}
+                          />
+                        )}
+                      </div>
+                      <span className="plan-row-arrow" aria-hidden="true">
+                        質問を生成 <ArrowRight size={13} />
                       </span>
-                      <small>
-                        {tick >= index * 2 + 4
-                          ? "Answered"
-                          : tick >= index * 2 + 3
-                            ? "Sent"
-                            : "Generated"}
-                      </small>
-                    </div>
-                    <h3>{question.text}</h3>
-                    <dl>
-                      <dt>Objective</dt>
-                      <dd>{question.purpose}</dd>
-                      <dt>Source</dt>
-                      <dd>{question.origin}</dd>
-                    </dl>
-                    <blockquote>{question.trigger}</blockquote>
-                    <button
-                      className="text-button"
-                      disabled={tick < 3}
-                      onClick={() => openStep(3)}
-                    >
-                      View interview <ArrowRight size={14} />
-                    </button>
-                  </article>
-                ))}
-              </div>
+                      <article className="plan-row-question">
+                        <div className="question-title">
+                          <strong>{question.id}</strong>
+                          <span>
+                            {index === 0
+                              ? "Initial question"
+                              : "Follow-up question"}
+                          </span>
+                          <small>
+                            {tick >= index * 2 + 4
+                              ? "Answered"
+                              : tick >= index * 2 + 3
+                                ? "Sent"
+                                : "Generated"}
+                          </small>
+                        </div>
+                        <h3>{question.text}</h3>
+                        <dl>
+                          <dt>Objective</dt>
+                          <dd>{question.purpose}</dd>
+                          <dt>Source</dt>
+                          <dd>{question.origin}</dd>
+                        </dl>
+                        <blockquote>{question.trigger}</blockquote>
+                        <button
+                          className="text-button"
+                          disabled={tick < 3}
+                          onClick={() => openStep(3)}
+                        >
+                          View interview <ArrowRight size={14} />
+                        </button>
+                      </article>
+                    </li>
+                  );
+                })}
+              </ol>
               {!ready && visibleQuestions.length < 3 && (
                 <p className="trace-note">
                   次の質問は、匠の回答を受け取った時点で表示されます。

@@ -499,7 +499,7 @@ Q2以降は、インタビュー中に匠の回答を受けて生成します。
         message: `取得した知見を確認し、まだ分からない点を整理して最初の質問を作りました。${rows
           .map((row) => `既存知見 ${row.knownFrom.join("・")} → 確認したい点「${row.unknown}」 → ${row.question}`)
           .join(" ")} 追加の質問は、インタビュー中に匠の回答を受けて作ります。`,
-        screen: "Question Plan（参照した既存知見 → 確認したい点 → 質問 のグラフと質問カード）",
+        screen: "Question Plan（質問ごとに、左にその質問の最小限のオントロジー、右に質問カード）",
         next: "$expert-interview で、匠へのインタビューを始めます。",
       },
       advance("plan"),

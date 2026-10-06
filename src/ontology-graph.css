@@ -1176,3 +1176,7 @@
   vector-effect: non-scaling-stroke;
   stroke-width: 1.6;
 }
+/* The per-question graphs are small enough to read whole: no zoom buttons. */
+.plan-graph .onto-zoom {
+  display: none;
+}

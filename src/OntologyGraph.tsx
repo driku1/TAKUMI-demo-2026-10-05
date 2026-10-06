@@ -134,6 +134,7 @@ export default function OntologyGraph({
   spotlight,
   caption,
   onNodeClick,
+  height,
 }: {
   knowledge: Knowledge[];
   /** Current answer's use of registered knowledge (session only, never saved). */
@@ -155,6 +156,8 @@ export default function OntologyGraph({
   caption?: string;
   /** Embed variant: a node was chosen; return true when handled. */
   onNodeClick?: (node: OntologyNode) => boolean | void;
+  /** Canvas height when the variant's default does not fit. */
+  height?: number;
 }) {
   const uid = useId().replace(/:/g, "");
   const interactive = variant !== "card";
@@ -212,7 +215,8 @@ export default function OntologyGraph({
   const [camera, setCamera] = useState<Camera>({ scale: 0.6, tx: 0, ty: 0 });
   // Embed variant: the camera glides when a step or a person changes the frame.
   const [glide, setGlide] = useState(false);
-  const [size, setSize] = useState({ w: 0, h: heights[variant] });
+  const canvasHeight = height ?? heights[variant];
+  const [size, setSize] = useState({ w: 0, h: canvasHeight });
   const canvasRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; tx: number; ty: number; moved: boolean } | null>(null);
@@ -651,7 +655,7 @@ export default function OntologyGraph({
         <div
           ref={canvasRef}
           className={`onto-canvas ${variant === "page" && selectedNode ? "has-detail" : ""}`}
-          style={{ height: heights[variant] }}
+          style={{ height: canvasHeight }}
         >
           {variant !== "card" && projection && (
             <div className="onto-floating" aria-hidden="true">

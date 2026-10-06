@@ -1648,8 +1648,11 @@ export type QuestionPlanRow = {
   answer?: { label: string; text: string };
 };
 
-export type QuestionPlanProjection = OntologyProjection & {
-  rows: QuestionPlanRow[];
+export type QuestionPlanProjection = {
+  /** One row per question, each with its own minimal graph. */
+  rows: (QuestionPlanRow & { graph: OntologyProjection })[];
+  /** Retrieved notes the questions rest on (all rows). */
+  noteCount: number;
 };
 
 /**
@@ -1741,10 +1744,12 @@ export function questionPlanProjection({
       };
     });
 
-  // Columns: what was known (notes, answers) → still unknown → question.
-  const columnX = 330;
-  const nodes: OntologyNode[] = [];
-  const edges: OntologyEdge[] = [];
+  // One minimal graph per question, read from the top: where it started
+  // (the consultation the notes were retrieved for, the question the answer
+  // replied to) → the notes and the answer → the point to confirm. The
+  // question itself is shown beside the graph, not in it.
+  const TIER = 125;
+  const SPACING = 240;
   const temporary = (
     id: string,
     kind: NodeKind,
@@ -1753,52 +1758,42 @@ export function questionPlanProjection({
     sub: string | undefined,
     x: number,
     y: number,
+    w = 220,
   ) =>
-    node({ id, kind, layer: "issue", typeLabel, label, sub, x, y, w: 230, h: 74, hypothetical: true });
-  let bottom = -Infinity;
-  const leftY = new Map<string, number>();
-  const placeLeft = (item: OntologyNode, h: number) => {
-    const y = (Number.isFinite(bottom) ? bottom + 18 : 0) + h / 2;
-    bottom = y + h / 2;
-    nodes.push({ ...item, x: -columnX, y, w: 230, h });
-    leftY.set(item.id, y);
-    return y;
-  };
-  let rowBottom = -Infinity;
-  for (const row of rows) {
-    const sourceYs: number[] = [];
-    for (const id of row.noteIds) {
-      if (leftY.has(id)) {
-        sourceYs.push(leftY.get(id)!);
-        continue;
-      }
-      const source = byId.get(id)!;
-      sourceYs.push(placeLeft(source, source.kind === "knowledge" ? 74 : 56));
-    }
-    if (row.answer && row.answerIndex !== undefined) {
-      const answerId = `answer-${row.question.id}`;
-      sourceYs.push(
-        placeLeft(
-          temporary(
-            answerId,
-            "answer",
-            `${row.answer.label} · ${expert?.name ?? "匠"}の回答（対話）`,
-            row.answer.text,
-            undefined,
-            0,
-            0,
-          ),
-          74,
-        ),
-      );
-    }
-    const target = sourceYs.length
-      ? sourceYs.reduce((a, b) => a + b, 0) / sourceYs.length
-      : 37;
-    const y = Number.isFinite(rowBottom) ? Math.max(target, rowBottom + 22 + 37) : target;
-    rowBottom = y + 37;
+    node({ id, kind, layer: "issue", typeLabel, label, sub, x, y, w, h: 74, hypothetical: true });
+  const graphs = rows.map((row, index): OntologyProjection => {
+    const nodes: OntologyNode[] = [];
+    const edges: OntologyEdge[] = [];
+    const previous = rows[index - 1]?.question;
+    const answerId = `answer-${row.question.id}`;
     const gapId = `gap-${row.question.id}`;
-    const questionId = `question-${row.question.id}`;
+    const middle = [
+      ...row.noteIds,
+      ...(row.answer && row.answerIndex !== undefined ? [answerId] : []),
+    ];
+    const xOf = (position: number) => (position - (middle.length - 1) / 2) * SPACING;
+    row.noteIds.forEach((id, position) => {
+      const source = byId.get(id)!;
+      nodes.push({ ...source, x: xOf(position), y: TIER, w: 220, h: source.kind === "knowledge" ? 74 : 56 });
+    });
+    if (row.noteIds.length) {
+      const x = row.noteIds.reduce((sum, _id, position) => sum + xOf(position), 0) / row.noteIds.length;
+      nodes.push(temporary("origin-consultation", "origin", "相談（検索の起点）", scenario.question, undefined, x, 0));
+      for (const id of row.noteIds) {
+        edges.push({ id: `plan:origin-consultation>${id}`, source: "origin-consultation", target: id, kind: "plan", label: "検索で取得" });
+      }
+    }
+    if (middle.includes(answerId) && row.answer) {
+      const x = xOf(middle.length - 1);
+      nodes.push(
+        temporary(answerId, "answer", `${row.answer.label} · ${expert?.name ?? "匠"}の回答（対話）`, row.answer.text, undefined, x, TIER),
+      );
+      if (previous) {
+        const originId = `origin-${previous.id}`;
+        nodes.push(temporary(originId, "origin", `${previous.id} · 前の質問`, previous.text, undefined, x, 0));
+        edges.push({ id: `plan:${originId}>${answerId}`, source: originId, target: answerId, kind: "plan", label: "匠の回答" });
+      }
+    }
     nodes.push(
       temporary(
         gapId,
@@ -1807,79 +1802,37 @@ export function questionPlanProjection({
         row.unknown,
         row.topics.length ? `観点：${row.topics.join("・")}` : undefined,
         0,
-        y,
-      ),
-      temporary(
-        questionId,
-        "question",
-        `${row.question.id} · 生成した質問（一時表示）`,
-        row.question.text,
-        undefined,
-        columnX,
-        y,
+        TIER * 2,
+        260,
       ),
     );
     for (const id of row.noteIds) {
       edges.push({ id: `plan:${id}>${gapId}`, source: id, target: gapId, kind: "plan", label: "参照した既存知見" });
     }
-    if (row.answer) {
-      edges.push({
-        id: `plan:answer-${row.question.id}>${gapId}`,
-        source: `answer-${row.question.id}`,
-        target: gapId,
-        kind: "plan",
-        label: "直前の回答",
-      });
+    if (middle.includes(answerId)) {
+      edges.push({ id: `plan:${answerId}>${gapId}`, source: answerId, target: gapId, kind: "plan", label: "直前の回答" });
     }
-    edges.push({ id: `plan:${gapId}>${questionId}`, source: gapId, target: questionId, kind: "plan", label: "質問を生成" });
-  }
-
-  // One step further back: the consultation the notes were retrieved for,
-  // and the question each answer replied to (shown again in that row).
-  const originX = -columnX - 115 - 70 - 100;
-  const origin = (id: string, typeLabel: string, label: string, y: number) =>
-    node({ id, kind: "origin", layer: "issue", typeLabel, label, x: originX, y, w: 200, h: 74, hypothetical: true });
-  const drawnNotes = [...leftY.keys()].filter((id) => used.has(id));
-  if (drawnNotes.length) {
-    const firstRow = rows[0]?.noteIds.length ? rows[0].noteIds : drawnNotes.slice(0, 1);
-    const y = firstRow.reduce((sum, id) => sum + leftY.get(id)!, 0) / firstRow.length;
-    nodes.push(origin("origin-consultation", "相談（検索の起点）", scenario.question, y));
-    for (const id of drawnNotes) {
-      edges.push({
-        id: `plan:origin-consultation>${id}`,
-        source: "origin-consultation",
-        target: id,
-        kind: "plan",
-        label: "検索で取得",
-        route: "side",
-      });
-    }
-  }
-  rows.forEach((row, index) => {
-    const previous = rows[index - 1]?.question;
-    const answerId = `answer-${row.question.id}`;
-    if (!row.answer || !previous || !leftY.has(answerId)) return;
-    const id = `origin-${previous.id}`;
-    nodes.push(origin(id, `${previous.id} · 前の質問（再掲）`, previous.text, leftY.get(answerId)!));
-    edges.push({ id: `plan:${id}>${answerId}`, source: id, target: answerId, kind: "plan", label: "匠の回答" });
+    return {
+      key: `plan:${scenario.id}:${row.question.id}`,
+      tone: "plan",
+      nodes,
+      edges,
+      emphasisNodeIds: row.noteIds,
+      emphasisEdgeIds: edges.map((item) => item.id),
+      badges: Object.fromEntries(row.noteIds.map((id) => [id, "参照"])),
+      caption: `${row.question.id}の根拠`,
+      stats: row.noteIds.length
+        ? `参照した既存知見${row.noteIds.length}件（一時表示・保存しない）`
+        : "直前の回答から（一時表示・保存しない）",
+    };
   });
 
-  const noteIds = [...used];
   return {
-    key: `plan:${scenario.id}:${questions.map((item) => item.id).join(",")}`,
-    tone: "plan",
-    nodes,
-    edges,
-    emphasisNodeIds: noteIds,
-    emphasisEdgeIds: edges.map((item) => item.id),
-    badges: Object.fromEntries(
-      hits
-        .filter((hit) => used.has(hit.nodeId))
-        .map((hit) => [hit.nodeId, "参照"]),
-    ),
-    caption: "質問の根拠",
-    stats: `質問${rows.length}件 · 参照した既存知見${noteIds.length}件（一時表示・保存しない）`,
-    rows: rows.map(({ noteIds: _ids, answerIndex: _index, ...row }) => row),
+    rows: rows.map(({ noteIds: _ids, answerIndex: _index, ...row }, index) => ({
+      ...row,
+      graph: graphs[index],
+    })),
+    noteCount: used.size,
   };
 }
 

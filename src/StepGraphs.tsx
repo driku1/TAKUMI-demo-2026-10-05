@@ -8,9 +8,8 @@ import {
   buildOntology,
   candidateOverview,
   expertSpotlight,
-  questionPlanProjection,
   retrievalProjection,
-  type PlannedQuestion,
+  type OntologyProjection,
 } from "./ontology";
 
 /*
@@ -302,40 +301,39 @@ export function ExpertMatchingMap({
 }
 
 /**
- * Question Plan: only what each question came from — the retrieved notes it
- * used and the expert's previous answer — then the point to confirm and the
- * question, drawn in that order. A supplement to the question cards.
+ * Question Plan: the minimal graph of one question — where it started (the
+ * consultation, or the question the expert answered), the notes and answer
+ * it rests on, and the point to confirm. The question sits beside it.
  */
-export function QuestionPlanOntology({
+export function QuestionRationaleGraph({
   knowledge,
   scenario,
-  retrieval,
-  questions,
+  graph,
   onArticle,
-}: Common & { retrieval: Retrieval; questions: PlannedQuestion[] }) {
-  const ids = questions.map((item) => item.id).join(",");
-  const projection = useMemo(
-    () => questionPlanProjection({ knowledge, scenario, retrieval, questions }),
-    // Questions appear one by one; the list is rebuilt on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [knowledge, scenario, retrieval, ids],
-  );
+}: Omit<Common, "onOpenGraph"> & { graph: OntologyProjection }) {
   return (
     <div className="plan-graph">
       <OntologyGraph
         variant="inline"
+        height={380}
         knowledge={knowledge}
         scenario={scenario}
-        projection={projection}
+        projection={graph}
         onArticle={onArticle}
       />
-      <StepLegend
-        items={[
-          { color: "#7c3aed", label: "実線の枠＝検索で取得した既存知見（選ぶと本文）" },
-          { ...stepLineStyles.plan, label: "相談・前の質問 → 既存知見・匠の回答 → 確認したい点 → 質問（一時表示）" },
-          { color: "#7c3aed", dash: "6 4", label: "点線の枠＝今回だけの項目（保存しない）" },
-        ]}
-      />
     </div>
+  );
+}
+
+/** One legend for all the question graphs. */
+export function QuestionPlanLegend() {
+  return (
+    <StepLegend
+      items={[
+        { color: "#7c3aed", label: "実線の枠＝検索で取得した既存知見（選ぶと本文）" },
+        { ...stepLineStyles.plan, label: "相談・前の質問 → 既存知見・匠の回答 → 確認したい点（一時表示）" },
+        { color: "#7c3aed", dash: "6 4", label: "点線の枠＝今回だけの項目（保存しない）" },
+      ]}
+    />
   );
 }
