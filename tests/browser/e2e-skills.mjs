@@ -31,7 +31,8 @@ const errors = [];
 p.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 p.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('ERR_CERT')) errors.push('console: ' + m.text()); });
 const hint = () => p.locator('.skill-hint').innerText();
-const log = () => p.locator('.execution-log').innerText();
+// The progress bar with each step's event history (its tooltip).
+const log = () => p.locator('.run-steps li').evaluateAll((els) => els.map((li) => `${li.innerText} ${li.querySelector('button')?.title ?? ''}`).join(' | '));
 const toast = (text) => p.locator('.toast', { hasText: text }).waitFor({ timeout: 6000 }).then(() => true, () => false);
 
 try {
@@ -59,20 +60,20 @@ try {
   // 3. expert-matching
   const matching = skill('expert-matching');
   check('expert-matching: candidates and expected graphs', matching.status === 'success' && matching.details.candidates.length === 5);
-  await p.locator('.spot-layout .onto-embed').waitFor({ timeout: 8000 });
-  check('expert-matching: screen shows the whole ontology and the five candidates', (await p.locator('.candidate-pick').count()) === 5 && (await p.locator('.spot-layout .onto-node.is-candidate').count()) === 5 && (await p.locator('.spot-layout .spot-graph .portrait').count()) === 0 && (await p.locator('.candidate-pick .portrait').count()) === 5 && (await hint()).includes('$interview-plan'));
-  await p.locator('.candidate-pick').first().click();
+  await p.locator('.support-graph .onto-embed').waitFor({ timeout: 8000 });
+  check('expert-matching: screen shows the five candidates in a table, with the whole ontology below as support', (await p.locator('.candidate-table tbody tr').count()) === 5 && (await p.locator('.support-graph .onto-node.is-candidate').count()) === 5 && (await p.locator('.support-graph .portrait').count()) === 0 && (await p.locator('.candidate-table .portrait').count()) === 5 && (await hint()).includes('$interview-plan'));
+  await p.locator('.candidate-table .candidate-pick').first().click();
   await p.waitForTimeout(1000);
-  check('expert-matching: the presenter picks a name and the map lights where they can add knowledge', (await p.locator('.spot-layout .onto-node.is-temporary').count()) === 1 && (await p.locator('.spot-layout .onto-node.is-target').count()) >= 2);
-  await p.locator('.spot-layout').screenshot({ path: `${out}/k2-expert-matching.png` });
+  check('expert-matching: the presenter picks a row and the map lights where they can add knowledge', (await p.locator('.candidate-table tr.open').count()) === 1 && (await p.locator('.support-graph .onto-node.is-temporary').count()) === 1 && (await p.locator('.support-graph .onto-node.is-target').count()) >= 2);
+  await p.locator('.match-view').screenshot({ path: `${out}/k2-expert-matching.png` });
 
   // 4. interview-plan
   const plan = skill('interview-plan');
   check('interview-plan: Q1 from retrieved knowledge and the gap', plan.status === 'success' && plan.details.questions.length === 1 && plan.details.questions[0].knownFrom.length > 0);
-  await p.locator('.plan-graph .onto-node.kind-question').first().waitFor({ timeout: 8000 });
-  check('interview-plan: screen shows notes → point to confirm → Q1 only', (await p.locator('.plan-graph .onto-node.kind-question').count()) === 1 && (await p.locator('.plan-graph .onto-node.kind-gap').count()) === 1 && (await hint()).includes('$expert-interview'));
-  await p.waitForTimeout(1600);
-  await p.locator('.plan-graph').screenshot({ path: `${out}/k3-plan.png` });
+  await p.locator('.plan-row').first().waitFor({ timeout: 8000 });
+  check('interview-plan: one row with the Q1 graph (… → point to confirm) and Q1 beside it', (await p.locator('.plan-row').count()) === 1 && (await p.locator('.plan-row .onto-node.kind-gap').count()) === 1 && (await p.locator('.plan-row .plan-row-question h3').count()) === 1 && (await hint()).includes('$expert-interview'));
+  await p.waitForTimeout(1800);
+  await p.locator('.plan-list').screenshot({ path: `${out}/k3-plan.png` });
 
   // 5. expert-interview plays the dialogue, then the response
   const interview = skill('expert-interview');
@@ -105,7 +106,7 @@ try {
   await p.locator('.run-state', { hasText: 'Answered' }).waitFor({ timeout: 8000 });
   const againLog = await log();
   check('same question: screen goes retrieved → found → skipped → response', ['Knowledge retrieved', 'Registered knowledge found', 'Expert interview skipped', 'Response compiled'].every((t) => againLog.includes(t)) && !againLog.includes('Experts matched'));
-  await p.locator('.execution-log button', { hasText: 'Response compiled' }).click();
+  await p.locator('.run-steps button', { hasText: 'Design Response' }).click();
   check('same question: answer cites the merged note', (await p.locator('.reuse-panel').innerText()).includes(merged[0].id));
   const skipped = skill('expert-matching');
   check('expert-matching after a knowledge-only answer is skipped', skipped.status === 'skipped' && await toast('登録知見だけで回答済み'));
@@ -114,7 +115,7 @@ try {
   const related = skill('design-consultation', RELATED);
   check('related question: knowledge-only with seed-2-7', related.mode === 'knowledge-only' && related.details.checks.some((c) => c.sources.some((s) => s.includes('seed-2-7'))));
   await p.locator('.run-state', { hasText: 'Answered' }).waitFor({ timeout: 8000 });
-  await p.locator('.execution-log button', { hasText: 'Response compiled' }).click();
+  await p.locator('.run-steps button', { hasText: 'Design Response' }).click();
   check('related question: screen cites the merged note and seed-2-7', (await p.locator('.reuse-panel').innerText()).includes('seed-2-7'));
   await p.locator('.trace-panel').screenshot({ path: `${out}/k7-related.png` });
 

@@ -23,14 +23,14 @@ try {
     await home(); await p.locator('.sample-chips button', { hasText: tab }).click();
     await p.getByRole('button', { name: /Run agent/ }).click();
     await p.locator('.run-state', { hasText: 'Answered' }).waitFor({ timeout: 15000 });
-    check(`${sid}: same question answered from the merged note`, (await p.locator('.execution-log').innerText()).includes('Expert interview skipped'));
-    await p.locator('.execution-log button', { hasText: 'Response compiled' }).click();
+    check(`${sid}: same question answered from the merged note`, (await p.locator('.run-progress').innerText()).includes('Expert interview skipped'));
+    await p.locator('.run-steps button', { hasText: 'Design Response' }).click();
     check(`${sid}: same question cites the merged ID`, (await p.locator('.reuse-panel').innerText()).includes(k1.id));
     await home(); await p.locator('textarea[aria-label="相談内容"]').fill(question);
     await p.getByRole('button', { name: /Run agent/ }).click();
     await p.locator('.run-state', { hasText: 'Answered' }).waitFor({ timeout: 15000 });
-    check(`${sid}: typed question answered from knowledge only`, (await p.locator('.execution-log').innerText()).includes('Expert interview skipped'));
-    await p.locator('.execution-log button', { hasText: 'Response compiled' }).click();
+    check(`${sid}: typed question answered from knowledge only`, (await p.locator('.run-progress').innerText()).includes('Expert interview skipped'));
+    await p.locator('.run-steps button', { hasText: 'Design Response' }).click();
     check(`${sid}: answer cites the merged ID`, (await p.locator('.reuse-panel').innerText()).includes(k1.id));
     await p.getByRole('button', { name: 'Knowledge Graph' }).first().click();
     await p.locator('.filter-tabs button', { hasText: tab }).click(); await p.waitForTimeout(400);

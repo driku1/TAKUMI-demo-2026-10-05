@@ -1095,17 +1095,39 @@
     transition: none !important;
   }
 }
-/* Question Plan: the point to confirm, then the question, appear after the
-   knowledge they come from. */
+/* Question Plan, read from the left: where it started (the consultation,
+   the previous question) → the knowledge and answers → the point to confirm
+   → the question. Each column appears after the one before it. */
+.plan-graph .onto-node.kind-document,
+.plan-graph .onto-node.kind-knowledge,
+.plan-graph .onto-node.kind-answer,
+.plan-graph .onto-edge.to-document,
+.plan-graph .onto-edge.to-knowledge,
+.plan-graph .onto-edge.to-answer,
+.plan-graph .onto-edge-label.to-document,
+.plan-graph .onto-edge-label.to-knowledge,
+.plan-graph .onto-edge-label.to-answer {
+  animation: plan-in 0.45s ease 0.3s backwards;
+}
 .plan-graph .onto-node.kind-gap,
 .plan-graph .onto-edge.to-gap,
 .plan-graph .onto-edge-label.to-gap {
-  animation: plan-in 0.45s ease 0.35s backwards;
+  animation: plan-in 0.45s ease 0.75s backwards;
 }
 .plan-graph .onto-node.kind-question,
 .plan-graph .onto-edge.to-question,
 .plan-graph .onto-edge-label.to-question {
-  animation: plan-in 0.45s ease 1s backwards;
+  animation: plan-in 0.45s ease 1.2s backwards;
+}
+.onto-node.kind-origin .outer {
+  fill: #f8f7fa;
+  stroke: #7c3aed;
+}
+.onto-node.kind-origin .node-type {
+  fill: #5b21b6;
+}
+.onto-node.kind-origin .node-icon {
+  fill: #7c3aed;
 }
 @keyframes plan-in {
   from {
@@ -1153,4 +1175,8 @@
 .onto-embed .onto-edge.soft {
   vector-effect: non-scaling-stroke;
   stroke-width: 1.6;
+}
+/* The per-question graphs are small enough to read whole: no zoom buttons. */
+.plan-graph .onto-zoom {
+  display: none;
 }

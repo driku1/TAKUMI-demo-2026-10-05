@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { ArrowRight, ChevronRight, FileText } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { ArrowRight, ChevronRight, FileText, Network } from "lucide-react";
 import type { Expert, Knowledge, Scenario } from "./data";
 import type { recommendExperts, retrieveKnowledge } from "./process-model";
 import OntologyGraph, { LineSample, stepLineStyles } from "./OntologyGraph";
@@ -8,9 +8,8 @@ import {
   buildOntology,
   candidateOverview,
   expertSpotlight,
-  questionPlanProjection,
   retrievalProjection,
-  type PlannedQuestion,
+  type OntologyProjection,
 } from "./ontology";
 
 /*
@@ -126,7 +125,10 @@ export function RetrievalOntology({
   );
 }
 
-/** Expert Matching: the whole map, the candidates, and where one of them can add knowledge. */
+/**
+ * Expert Matching: the candidate table comes first; the whole map below it is
+ * supporting — it shows where the chosen candidate can add knowledge.
+ */
 export function ExpertMatchingMap({
   knowledge,
   scenario,
@@ -134,7 +136,13 @@ export function ExpertMatchingMap({
   onArticle,
   onExpert,
   onOpenGraph,
-}: Common & { candidates: Candidate[]; onExpert: (expert: Expert) => void }) {
+  children,
+}: Common & {
+  candidates: Candidate[];
+  onExpert: (expert: Expert) => void;
+  /** Shown between the table and the supporting graph. */
+  children?: ReactNode;
+}) {
   const [chosen, setChosen] = useState<number | null>(null);
   const view = useMemo(
     () => buildOntology({ knowledge, scenario, stage: "after" }),
@@ -162,11 +170,132 @@ export function ExpertMatchingMap({
   const choose = (id: number) => setChosen((value) => (value === id ? null : id));
   const article = (id: string) => knowledge.find((item) => item.id === id);
   return (
-    <div className="spot-wrap">
-      <div className="spot-layout">
-        <div className="spot-graph">
+    <div className="match-view">
+      <section className="candidate-board" aria-label="候補の匠">
+        <div className="candidate-board-head">
+          <h3>候補の匠 {candidates.length}名</h3>
+          <p>
+            行を選ぶと、下のナレッジグラフで、その匠へのインタビューで知見を追加できるところ（想定・未登録）を強調します。似顔絵は生成したイラストです。
+          </p>
+        </div>
+        <table className="candidate-table">
+          <thead>
+            <tr>
+              <th scope="col">順位</th>
+              <th scope="col">匠</th>
+              <th scope="col">選んだ理由・本人の知見</th>
+              <th scope="col">専門（グラフ上の観点）</th>
+              <th scope="col">知見を追加できるところ（想定）</th>
+            </tr>
+          </thead>
+          <tbody>
+            {candidates.map((candidate, index) => {
+              const open = candidate.expert.id === chosen;
+              const spotlight = spotlights.get(candidate.expert.id)!;
+              return (
+                <tr
+                  key={candidate.expert.id}
+                  className={`${open ? "open" : ""}${candidate.selected ? " chosen" : ""}`}
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement).closest("button")) return;
+                    choose(candidate.expert.id);
+                  }}
+                >
+                  <td className="candidate-rank-cell" data-label="順位">
+                    0{index + 1}
+                  </td>
+                  <td className="candidate-who" data-label="匠">
+                    <button
+                      type="button"
+                      className="candidate-pick"
+                      aria-pressed={open}
+                      onClick={() => choose(candidate.expert.id)}
+                    >
+                      <span className="candidate-face">
+                        <Portrait expert={candidate.expert} size={52} />
+                      </span>
+                      <span>
+                        <b>{candidate.expert.name}</b>
+                        <small>
+                          {candidate.expert.role} · 経験{candidate.expert.years}年
+                        </small>
+                        <em className={candidate.selected ? "chosen" : ""}>
+                          {candidate.selected ? "対話担当" : "候補"}
+                        </em>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="text-button candidate-profile"
+                      onClick={() => onExpert(candidate.expert)}
+                    >
+                      Profile <ChevronRight size={13} />
+                    </button>
+                  </td>
+                  <td className="candidate-reason-cell" data-label="選んだ理由・本人の知見">
+                    <p className="candidate-reason">{candidate.reason}</p>
+                    {spotlight.notes.slice(0, 2).map((note) => {
+                      const item = article(note.id);
+                      return (
+                        <button
+                          key={note.id}
+                          type="button"
+                          className="source-link"
+                          disabled={!item}
+                          onClick={() => item && onArticle(item)}
+                        >
+                          <FileText size={13} />
+                          {note.title}
+                          {note.retrieved && <em>検索で取得</em>}
+                        </button>
+                      );
+                    })}
+                  </td>
+                  <td className="candidate-spec-cell" data-label="専門（グラフ上の観点）">
+                    <span className="trace-tags">
+                      {spotlight.specialties.length > 0
+                        ? spotlight.specialties.map((item) => (
+                            <span key={item.id}>
+                              {item.label}
+                              {item.domain && <small>（{item.domain}）</small>}
+                            </span>
+                          ))
+                        : candidate.expert.tags.map((tag) => <span key={tag}>{tag}</span>)}
+                    </span>
+                  </td>
+                  <td className="candidate-target-cell" data-label="知見を追加できるところ（想定）">
+                    <ul className="candidate-targets">
+                      {spotlight.targets.map((target) => (
+                        <li key={target.id}>
+                          <i style={{ background: stepLineStyles.expected.color }} />
+                          {target.typeLabel}：{target.label}
+                        </li>
+                      ))}
+                      <li className="expected">
+                        <i />
+                        想定される知見：{spotlight.extraNodes[0].label}（未登録）
+                      </li>
+                    </ul>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p className="onto-step-note">
+          想定は専門領域タグ・担当業務・検索で見つかった本人の知見から作ったもので、回答の内容を予測するものではありません。登録PRをApprove・Mergeした内容だけがナレッジグラフに入ります。
+        </p>
+      </section>
+      {children}
+      <section className="support-graph" aria-label="補足：ナレッジグラフ">
+        <h3 className="trace-section-heading">
+          <Network size={16} /> 補足：ナレッジグラフ上の位置
+          <small>候補者は「匠」の層で紫色（一時表示・保存しない）</small>
+        </h3>
+        <div className="support-graph-frame">
           <OntologyGraph
             variant="embed"
+            height={540}
             initialStage="after"
             knowledge={knowledge}
             scenario={scenario}
@@ -174,7 +303,7 @@ export function ExpertMatchingMap({
             caption={
               person
                 ? `${person.expert.name}：インタビューで知見を追加できるところ（想定）`
-                : `匠の層の候補 ${candidates.length}名 — 名前を選ぶと強調します`
+                : `匠の層の候補 ${candidates.length}名 — 表の行を選ぶと強調します`
             }
             onArticle={onArticle}
             onNodeClick={(node) => {
@@ -193,149 +322,46 @@ export function ExpertMatchingMap({
             ]}
           />
         </div>
-        <aside className="spot-panel" aria-label="候補の匠">
-          <strong className="spot-panel-title">
-            候補の匠 {candidates.length}名
-            <small>候補者はナレッジグラフの「匠」の層で紫色になっています。名前を選ぶと、その人へのインタビューで知見を追加できるところを強調します（想定・未登録）。似顔絵は生成したイラストです。</small>
-          </strong>
-          <ol className="candidate-picker">
-            {candidates.map((candidate, index) => {
-              const open = candidate.expert.id === chosen;
-              const spotlight = spotlights.get(candidate.expert.id)!;
-              return (
-                <li key={candidate.expert.id} className={open ? "open" : ""}>
-                  <button
-                    type="button"
-                    className="candidate-pick"
-                    aria-pressed={open}
-                    onClick={() => choose(candidate.expert.id)}
-                  >
-                    <span className="candidate-face">
-                      <Portrait expert={candidate.expert} size={open ? 48 : 38} />
-                      <span className="candidate-rank">0{index + 1}</span>
-                    </span>
-                    <span>
-                      <b>{candidate.expert.name}</b>
-                      <small>
-                        {candidate.expert.role} · 経験{candidate.expert.years}年
-                      </small>
-                    </span>
-                    <em className={candidate.selected ? "chosen" : ""}>
-                      {candidate.selected ? "対話担当" : "候補"}
-                    </em>
-                  </button>
-                  {open && (
-                    <div className="candidate-detail">
-                      <p>{candidate.reason}</p>
-                      <dl>
-                        <dt>専門（グラフ上の観点）</dt>
-                        <dd className="trace-tags">
-                          {spotlight.specialties.length > 0
-                            ? spotlight.specialties.map((item) => (
-                                <span key={item.id}>
-                                  {item.label}
-                                  {item.domain && <small>（{item.domain}）</small>}
-                                </span>
-                              ))
-                            : candidate.expert.tags.map((tag) => <span key={tag}>{tag}</span>)}
-                        </dd>
-                        <dt>知見を追加できるところ（想定）</dt>
-                        <dd>
-                          <ul className="candidate-targets">
-                            {spotlight.targets.map((target) => (
-                              <li key={target.id}>
-                                <i style={{ background: stepLineStyles.expected.color }} />
-                                {target.typeLabel}：{target.label}
-                              </li>
-                            ))}
-                            <li className="expected">
-                              <i />
-                              想定される知見：{spotlight.extraNodes[0].label}（未登録）
-                            </li>
-                          </ul>
-                        </dd>
-                        {spotlight.notes.length > 0 && (
-                          <>
-                            <dt>本人の知見（{spotlight.notes.length}件）</dt>
-                            <dd>
-                              {spotlight.notes.slice(0, 4).map((note) => {
-                                const item = article(note.id);
-                                return (
-                                  <button
-                                    key={note.id}
-                                    type="button"
-                                    className="source-link"
-                                    disabled={!item}
-                                    onClick={() => item && onArticle(item)}
-                                  >
-                                    <FileText size={13} />
-                                    {note.title}
-                                    {note.retrieved && <em>検索で取得</em>}
-                                  </button>
-                                );
-                              })}
-                            </dd>
-                          </>
-                        )}
-                      </dl>
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={() => onExpert(candidate.expert)}
-                      >
-                        View profile <ChevronRight size={14} />
-                      </button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-          <p className="onto-step-note">
-            想定は専門領域タグ・担当業務・検索で見つかった本人の知見から作ったもので、回答の内容を予測するものではありません。登録PRをApprove・Mergeした内容だけがナレッジグラフに入ります。
-          </p>
-          <OpenGraph onOpenGraph={onOpenGraph} />
-        </aside>
-      </div>
+        <OpenGraph onOpenGraph={onOpenGraph} />
+      </section>
     </div>
   );
 }
 
 /**
- * Question Plan: only what each question came from — the retrieved notes it
- * used and the expert's previous answer — then the point to confirm and the
- * question, drawn in that order. A supplement to the question cards.
+ * Question Plan: the minimal graph of one question — where it started (the
+ * consultation, or the question the expert answered), the notes and answer
+ * it rests on, and the point to confirm. The question sits beside it.
  */
-export function QuestionPlanOntology({
+export function QuestionRationaleGraph({
   knowledge,
   scenario,
-  retrieval,
-  questions,
+  graph,
   onArticle,
-}: Common & { retrieval: Retrieval; questions: PlannedQuestion[] }) {
-  const ids = questions.map((item) => item.id).join(",");
-  const projection = useMemo(
-    () => questionPlanProjection({ knowledge, scenario, retrieval, questions }),
-    // Questions appear one by one; the list is rebuilt on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [knowledge, scenario, retrieval, ids],
-  );
+}: Omit<Common, "onOpenGraph"> & { graph: OntologyProjection }) {
   return (
     <div className="plan-graph">
       <OntologyGraph
         variant="inline"
+        height={300}
         knowledge={knowledge}
         scenario={scenario}
-        projection={projection}
+        projection={graph}
         onArticle={onArticle}
       />
-      <StepLegend
-        items={[
-          { color: "#7c3aed", label: "実線の枠＝検索で取得した既存知見（選ぶと本文）" },
-          { ...stepLineStyles.plan, label: "既存知見・直前の回答 → 確認したい点 → 質問（一時表示）" },
-          { color: "#7c3aed", dash: "6 4", label: "点線の枠＝今回だけの項目（保存しない）" },
-        ]}
-      />
     </div>
+  );
+}
+
+/** One legend for all the question graphs. */
+export function QuestionPlanLegend() {
+  return (
+    <StepLegend
+      items={[
+        { color: "#7c3aed", label: "実線の枠＝検索で取得した既存知見（選ぶと本文）" },
+        { ...stepLineStyles.plan, label: "相談・前の質問 → 既存知見・匠の回答 → 確認したい点（一時表示）" },
+        { color: "#7c3aed", dash: "6 4", label: "点線の枠＝今回だけの項目（保存しない）" },
+      ]}
+    />
   );
 }

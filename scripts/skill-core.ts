@@ -447,7 +447,7 @@ ${candidates
           })),
         },
         message: `専門領域と検索結果の執筆者を照合し、候補${candidates.length}名を選びました。対話担当は${chosen.expert.name}（${chosen.expert.role}）です。ナレッジグラフ全体に候補者の所属と専門を表示しました。候補者の名前を選ぶと、その人へのインタビューで知見を追加できるところ（想定・未登録）を強調します。`,
-        screen: "Expert Matching（左：ナレッジグラフ全体、右：候補者。名前を選ぶと、知見を追加できるところを強調）",
+        screen: "Expert Matching（候補者の表と、補足のナレッジグラフ全体。行を選ぶと、知見を追加できるところを強調）",
         next: "$interview-plan で、既存の知見から不足点を整理して質問を作ります。",
       },
       advance("experts"),
@@ -477,8 +477,9 @@ ${candidates
 
 ${plan.rows
   .map(
-    (row) => `## ${row.question.id}
+    (row, index) => `## ${row.question.id}
 
+- さかのぼり：${index === 0 || !row.answer ? "相談（検索の起点）→ 既存知見" : `${plan.rows[index - 1].question.id}（前の質問）→ ${row.answer.label}（匠の回答）`}
 - 既存知見：${row.notes.map((note) => `${note.id}「${note.title}」：${note.summary}`).join(" / ")}
 - 確認したい点：${row.unknown}${row.topics.length ? `（観点：${row.topics.join("・")}）` : ""}
 - 生成した質問：${row.question.text}`,
@@ -498,7 +499,7 @@ Q2以降は、インタビュー中に匠の回答を受けて生成します。
         message: `取得した知見を確認し、まだ分からない点を整理して最初の質問を作りました。${rows
           .map((row) => `既存知見 ${row.knownFrom.join("・")} → 確認したい点「${row.unknown}」 → ${row.question}`)
           .join(" ")} 追加の質問は、インタビュー中に匠の回答を受けて作ります。`,
-        screen: "Question Plan（参照した既存知見 → 確認したい点 → 質問 のグラフと質問カード）",
+        screen: "Question Plan（質問ごとに、右に質問カード、左に補足の最小限のオントロジー）",
         next: "$expert-interview で、匠へのインタビューを始めます。",
       },
       advance("plan"),
