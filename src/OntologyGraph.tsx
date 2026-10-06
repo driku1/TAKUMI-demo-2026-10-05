@@ -133,6 +133,7 @@ export default function OntologyGraph({
   spotlight,
   caption,
   onNodeClick,
+  introWhole = false,
 }: {
   knowledge: Knowledge[];
   /** Current answer's use of registered knowledge (session only, never saved). */
@@ -154,6 +155,8 @@ export default function OntologyGraph({
   caption?: string;
   /** Embed variant: a node was chosen; return true when handled. */
   onNodeClick?: (node: OntologyNode) => boolean | void;
+  /** Embed variant: open on the whole map, then glide to the spotlight. */
+  introWhole?: boolean;
 }) {
   const uid = useId().replace(/:/g, "");
   const interactive = variant !== "card";
@@ -277,7 +280,15 @@ export default function OntologyGraph({
       : variant === "inline" && focusNodeId
         ? egoLayout(full, focusNodeId, view.usedNodeIds).nodes
         : stageFrameNodes(view, scenario);
+  const introPending = useRef(introWhole);
   useEffect(() => {
+    if (introPending.current && size.w) {
+      introPending.current = false;
+      fitTo(full.nodes);
+      setGlide(false);
+      const timer = window.setTimeout(() => fitTo(frameNodes()), 900);
+      return () => window.clearTimeout(timer);
+    }
     fitTo(frameNodes(), variant === "page" && Boolean(focusNodeId) && autoSelect);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frameKey]);

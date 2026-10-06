@@ -70,9 +70,9 @@ try {
   const plan = skill('interview-plan');
   check('interview-plan: Q1 from retrieved knowledge and the gap', plan.status === 'success' && plan.details.questions.length === 1 && plan.details.questions[0].knownFrom.length > 0);
   await p.locator('.story-steps > li').first().waitFor({ timeout: 8000 });
-  check('interview-plan: the story starts from the whole map and leads to Q1', (await p.locator('.story-steps > li').count()) === 5 && (await p.locator('.story-steps > li.current').innerText()).includes('ナレッジ全体') && (await hint()).includes('$expert-interview'));
-  check('interview-plan: story lists retrieved notes, the point to confirm and Q1', plan.details.story.length === 5 && plan.details.story.at(-1).includes('Q1'));
-  await p.locator('.story-steps > li').nth(4).locator('button').click();
+  check('interview-plan: the story starts at what is still unknown and leads to Q1', (await p.locator('.story-steps > li').count()) === 2 && (await p.locator('.story-steps > li.current').innerText()).includes('まだ分からないこと') && (await hint()).includes('$expert-interview'));
+  check('interview-plan: story goes from the point to confirm to Q1', plan.details.story.length === 2 && plan.details.story.at(-1).includes('Q1'));
+  await p.locator('.story-steps > li').nth(1).locator('button').click();
   await p.waitForTimeout(1000);
   await p.locator('.spot-layout').screenshot({ path: `${out}/k3-plan.png` });
 

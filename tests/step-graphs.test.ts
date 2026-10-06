@@ -169,7 +169,7 @@ test("匠の選定：全体のグラフ上で、選んだ匠の所属・専門�
   }
 });
 
-test("質問計画のストーリー：全体のグラフから始まり、取得した知見 → まだ分からない点 → 質問の順にたどる", () => {
+test("質問計画のストーリー：取得した知見の段階は置かず、参照した既存知見 → まだ分からない点 → 質問の順にたどる", () => {
   for (const scenario of allQuestions) {
     const run = prepareRun({ query: scenario.question, scenario, knowledge: initialKnowledge });
     const questions = buildQuestions(run.scenario);
@@ -187,17 +187,18 @@ test("質問計画のストーリー：全体のグラフから始まり、取�
       });
       assert.deepEqual(
         steps.map((step) => step.id),
-        ["whole", "position", "found", ...shown.flatMap((question) => [`known-${question.id}`, `question-${question.id}`])],
+        shown.flatMap((question) => [`known-${question.id}`, `question-${question.id}`]),
+        "2 steps per question (6 with three questions)",
       );
-      const [whole, , found] = steps;
-      assert.deepEqual([whole.spotlight.nodeIds, whole.spotlight.frameIds], [[], []], "starts from the whole map");
-      // The search step lights the retrieved notes drawn on the map.
-      for (const id of found.spotlight.targetIds) {
+      // The first step lights the retrieved notes Q1 rests on, marked 参照.
+      const [first] = steps;
+      const referenced = first.spotlight.nodeIds.filter((id) => first.spotlight.badges[id] === "参照");
+      assert.ok(referenced.length > 0);
+      for (const id of referenced) {
         const note = view.nodes.find((item) => item.id === id)!;
         assert.ok(run.retrieval.results.some((result) => result.item.id === note.knowledgeId), id);
-        assert.equal(found.spotlight.badges[id], "取得");
       }
-      assert.ok(found.spotlight.targetIds.length > 0);
+      assert.match(first.text, /Knowledge retrievedで取得した知見のうち/);
       for (const step of steps) {
         const extraIds = new Set(step.spotlight.extraNodes.map((item) => item.id));
         const extraEdgeIds = new Set(step.spotlight.extraEdges.map((item) => item.id));

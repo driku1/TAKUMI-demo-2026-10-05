@@ -323,6 +323,8 @@ export function QuestionStoryMap({
   );
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
+  // The first step waits for the camera to come in from the whole map.
+  const firstStepMs = STORY_STEP_MS + 900;
   const last = steps.length - 1;
   const at = Math.min(index, last);
   const step = steps[at];
@@ -332,9 +334,9 @@ export function QuestionStoryMap({
       setPlaying(false);
       return;
     }
-    const timer = window.setTimeout(() => setIndex(at + 1), STORY_STEP_MS);
+    const timer = window.setTimeout(() => setIndex(at + 1), at === 0 ? firstStepMs : STORY_STEP_MS);
     return () => window.clearTimeout(timer);
-  }, [playing, at, last]);
+  }, [playing, at, last, firstStepMs]);
   const go = (next: number) => {
     setPlaying(false);
     setIndex(Math.max(0, Math.min(last, next)));
@@ -351,6 +353,7 @@ export function QuestionStoryMap({
             spotlight={step.spotlight}
             caption={`${at + 1}/${steps.length} ${step.title}`}
             onArticle={onArticle}
+            introWhole
           />
           <StepLegend
             items={[
@@ -363,7 +366,7 @@ export function QuestionStoryMap({
         <aside className="spot-panel story-panel" aria-label="質問に至った流れ">
           <strong className="spot-panel-title">
             質問に至った流れ
-            <small>ナレッジ全体から、取得した知見・まだ分からない点・質問の順にたどります（一時表示・新しい知見として登録しません）。</small>
+            <small>ナレッジグラフ全体の中で、参照した既存知見から、まだ分からない点・質問の順にたどります（一時表示・新しい知見として登録しません）。取得した知見の一覧はKnowledge retrievedにあります。</small>
           </strong>
           <div className="story-controls" role="group" aria-label="流れの操作">
             <button type="button" aria-label="前へ" disabled={at === 0} onClick={() => go(at - 1)}>

@@ -1961,10 +1961,11 @@ export type StoryStep = {
 };
 
 /**
- * Question Plan as a story on the whole map: all knowledge → where the
- * consultation sits → what the search returned → what is known and what is
- * still unknown → the question; later questions follow the expert's answers.
- * The points to confirm and the questions are temporary items.
+ * Question Plan as a story on the whole map, from the retrieved notes each
+ * question rests on: what is known and still unknown → the question; later
+ * questions follow the previous question and the expert's answer. What was
+ * retrieved is shown in Knowledge Search, so the story starts here. The
+ * points to confirm and the questions are temporary items.
  */
 export function questionStory({
   knowledge,
@@ -1986,8 +1987,6 @@ export function questionStory({
     view.nodes.find(
       (item) => (item.kind === "document" || item.kind === "knowledge") && item.knowledgeId === id,
     )?.id;
-  const counts = countSummary(view);
-  const registered = view.nodes.filter((item) => item.kind === "knowledge").length;
   const steps: StoryStep[] = [];
   const base = (key: string): Spotlight => ({
     key: `story:${scenario.id}:${key}`,
@@ -2001,59 +2000,6 @@ export function questionStory({
     frameIds: [],
     band: "今回の相談：既存知見 → 確認したい点 → 質問（一時表示・保存しない）",
     pins: [],
-  });
-
-  const whole = base("whole");
-  whole.pins = clusterDefs.map((item) => `domain-${item.id}`).filter((id) => byId.has(id));
-  steps.push({
-    id: "whole",
-    title: "社内のナレッジ全体",
-    text: `匠${experts.length}名、工程領域${clusterDefs.length}、既存ナレッジ${ontologyDocuments.length}件${registered ? `と登録知見${registered}件` : ""}が、${counts.links}本の関係でつながっています。ここから、今回の相談に関係する知見をたどります。`,
-    evidence: [],
-    spotlight: whole,
-  });
-
-  // Where the consultation sits: the domain, the part and the topics of the search terms.
-  const termTopics = unique(
-    retrieval.terms.map((term) => conceptForTerm(cluster, term)).filter((id) => id.startsWith("topic-")),
-  ).filter((id) => byId.has(id));
-  const position = base("position");
-  const domainId = `domain-${cluster.id}`;
-  const partId = `part-${cluster.id}`;
-  position.nodeIds = [domainId, partId, `team-${cluster.id}`, ...termTopics].filter((id) => byId.has(id));
-  position.edgeIds = view.edges
-    .filter((item) => position.nodeIds.includes(item.source) && position.nodeIds.includes(item.target))
-    .map((item) => item.id);
-  position.targetIds = termTopics;
-  position.frameIds = [domainId, partId, ...termTopics].filter((id) => byId.has(id));
-  position.pins = position.frameIds;
-  steps.push({
-    id: "position",
-    title: "相談の位置づけ",
-    text: `相談は「${cluster.domain}」${byId.has(partId) ? `の「${byId.get(partId)!.label}」` : ""}に当たります。検索語（${retrieval.terms.join("・")}）から、観点${termTopics.map((id) => `「${byId.get(id)!.label}」`).join("")}が関係します。`,
-    evidence: [`相談：${scenario.question}`],
-    spotlight: position,
-  });
-
-  // What the search returned.
-  const hits = retrieval.results
-    .map((result) => ({ result, nodeId: docNode(result.item.id) }))
-    .filter((hit): hit is { result: Retrieval["results"][number]; nodeId: string } => Boolean(hit.nodeId));
-  const found = base("found");
-  found.nodeIds = unique([...position.nodeIds, ...hits.map((hit) => hit.nodeId)]);
-  found.edgeIds = view.edges
-    .filter((item) => found.nodeIds.includes(item.source) && found.nodeIds.includes(item.target))
-    .map((item) => item.id);
-  found.targetIds = hits.map((hit) => hit.nodeId);
-  found.badges = Object.fromEntries(hits.map((hit) => [hit.nodeId, "取得"]));
-  found.frameIds = [...hits.map((hit) => hit.nodeId), ...termTopics];
-  found.pins = hits.map((hit) => hit.nodeId);
-  steps.push({
-    id: "found",
-    title: "検索で取得した既存知見",
-    text: `${retrieval.searchedCount}件のナレッジから、一致した語が多い${hits.length}件を取得しました。`,
-    evidence: hits.map((hit) => `${hit.result.item.id}「${hit.result.item.title}」 一致：${hit.result.matched.join("・")}`),
-    spotlight: found,
   });
 
   // Each question: what was known (notes, previous answer) → still unknown → question.
@@ -2114,7 +2060,7 @@ export function questionStory({
       title: index === 0 ? "分かること・まだ分からないこと" : `${row.answer?.label ?? "匠の回答"}を受けて、まだ分からないこと`,
       text:
         index === 0
-          ? `取得した知見${notes.length ? `（${row.notes.map((note) => note.id).join("・")}）` : ""}で分かることを確かめ、まだ分からない点を「確認したい点」として整理しました。`
+          ? `${notes.length ? `Knowledge retrievedで取得した知見のうち、${row.notes.map((note) => note.id).join("・")}を参照しました。そこから` : "取得した知見から"}分かることを確かめ、まだ分からない点を「確認したい点」として整理しました。`
           : `匠の回答${row.answer?.label ?? ""}と関連する既存知見から、次に確認したい点を整理しました。`,
       evidence: [
         ...row.notes.map((note) => `既存知見 ${note.id}「${note.title}」：${note.summary}`),

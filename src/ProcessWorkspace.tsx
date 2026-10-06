@@ -572,13 +572,13 @@ export default function ProcessWorkspace(props: Props) {
           {activeStep === 2 && (
             <>
               <p className="trace-intro">
-                検索結果から初回質問を作成し、匠の回答を受け取るごとに追加質問を生成します。ナレッジグラフ全体から、どの知見を取得し、何がまだ分からないと判断して、その質問を作ったかを順にたどれます。
+                検索結果から初回質問を作成し、匠の回答を受け取るごとに追加質問を生成します。ナレッジグラフ全体の中で、取得した知見のどれを参照し、何がまだ分からないと判断して、その質問を作ったかを順にたどれます（何を取得したかは Knowledge Search で確認できます）。
               </p>
               {visibleQuestions.length > 0 && (
                 <>
                   <h3 className="trace-section-heading">
                     <Network size={16} /> Question story
-                    <small>ナレッジ全体 → 取得した知見 → まだ分からない点 → 質問（一時表示）</small>
+                    <small>参照した既存知見 → まだ分からない点 → 質問（ナレッジグラフ全体の上で一時表示）</small>
                   </h3>
                   <QuestionStoryMap
                     knowledge={props.knowledge}

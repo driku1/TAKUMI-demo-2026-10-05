@@ -147,19 +147,25 @@ try {
   await p.locator('.story-steps').waitFor();
   const steps = p.locator('.story-steps > li');
   const current = async () => (await p.locator('.story-steps > li.current > button').innerText()).replace(/^\d+\s*/, '');
-  check('S3 story starts from the whole map (nothing dimmed, nothing temporary)', (await current()).includes('ナレッジ全体') && (await p.locator(`${spot} .onto-node.dim`).count()) === 0 && (await p.locator(`${spot} .onto-node.is-temporary`).count()) === 0 && (await spotNodes()) > 100);
-  check('S3 story: whole → position → retrieved → (known → question) × 3', (await steps.count()) === 9 && (await p.locator('.story-steps > li', { hasText: '生成した質問 Q3' }).count()) === 1);
-  await p.waitForTimeout(4700);
-  check('S3 story plays by itself', (await current()).includes('相談の位置づけ'));
+  const worldScale = () => p.locator(`${spot} .onto-world`).evaluate((el) => Number(/scale\(([\d.]+)\)/.exec(el.style.transform)?.[1]));
+  await p.waitForTimeout(250);
+  const opening = await worldScale();
+  check('S3 story opens on the whole map with the referenced notes lit', (await current()).includes('まだ分からないこと') && opening < 0.3 && (await p.locator(`${spot} .onto-node.dim`).count()) > 0 && (await spotNodes()) > 100, `${opening}`);
+  check('S3 story: (known → question) × 3, no separate retrieval steps', (await steps.count()) === 6 && (await p.locator('.story-steps > li', { hasText: '検索で取得' }).count()) === 0 && (await p.locator('.story-steps > li', { hasText: '生成した質問 Q3' }).count()) === 1);
+  await p.waitForTimeout(1800);
+  const closer = await worldScale();
+  check('S3 the camera comes in from the whole map', closer > opening * 1.5, `${opening} → ${closer}`);
+  await p.waitForTimeout(3800);
+  check('S3 story plays by itself', (await current()).includes('生成した質問 Q1'));
   await p.locator('.story-controls .story-play').click();
   const storyText = [];
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 6; i++) {
     await steps.nth(i).locator('button').click();
     await p.waitForTimeout(150);
     storyText.push(await p.locator('.story-body').innerText());
   }
-  check('S3 Q1 rests on retrieved note seed-2-7; Q2 on the previous answer', storyText[3].includes('seed-2-7') && storyText[5].includes('冷却時の収縮差による反り'));
-  await steps.nth(4).locator('button').click();
+  check('S3 Q1 rests on retrieved note seed-2-7; Q2 on the previous answer', storyText[0].includes('seed-2-7') && storyText[0].includes('Knowledge retrievedで取得した知見のうち') && storyText[2].includes('冷却時の収縮差による反り'));
+  await steps.nth(1).locator('button').click();
   await p.waitForTimeout(900);
   const q1 = p.locator(`${spot} .onto-node.kind-question`);
   check('S3 the Q1 step lights the point to confirm and the question', (await q1.count()) === 1 && !(await q1.getAttribute('class')).includes('dim') && (await p.locator(`${spot} .onto-node.kind-gap:not(.dim)`).count()) === 1);
@@ -167,7 +173,7 @@ try {
   await p.locator('.story-controls button[aria-label="次へ"]').click();
   await p.waitForTimeout(900);
   check('S3 next step: A1 → the next point to confirm, earlier items dimmed', (await current()).includes('A1') && (await p.locator(`${spot} .onto-node.kind-answer:not(.dim)`).count()) === 1 && (await p.locator(`${spot} .onto-node.kind-question.dim`).count()) === 0 && (await p.locator(`${spot} .onto-node.kind-question:not(.dim)`).count()) === 1);
-  await steps.nth(8).locator('button').click();
+  await steps.nth(5).locator('button').click();
   await p.waitForTimeout(900);
   // Q3 and the question its answer replied to (Q2) are lit; Q1 is dimmed.
   check('S3 last step: three questions drawn, earlier ones dimmed, no overlaps', (await p.locator(`${spot} .onto-node.kind-question`).count()) === 3 && (await p.locator(`${spot} .onto-node.kind-question.dim`).count()) === 1 && clean(await overlaps(spot)));
